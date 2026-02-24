@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>App2App Monitoring Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+</head>
+<body>
+  <!-- Main Content -->
+  <div class="main-content">
+    <!-- Header -->
+    <div class="header">
+      <h1>Monitoring Dashboard</h1>
+      <div class="user-info">
+        <span>Welcome back!</span>
+      </div>
+    </div>
+
+    <!-- KPI Cards -->
+    <div class="cards">
+      <div class="card card-purple">
+        <div class="card-icon">📋</div>
+        <div class="card-content">
+          <div class="card-value" id="totalRecords">0</div>
+          <div class="card-label">Total Records</div>
+        </div>
+      </div>
+      <div class="card card-blue">
+        <div class="card-icon">🔌</div>
+        <div class="card-content">
+          <div class="card-value" id="uniqueExtensions">0</div>
+          <div class="card-label">Extensions</div>
+        </div>
+      </div>
+      <div class="card card-green">
+        <div class="card-icon">📅</div>
+        <div class="card-content">
+          <div class="card-value" id="latestDate">-</div>
+          <div class="card-label">Latest Date</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Navigation Boxes -->
+    <div class="nav-tabs">
+      <div class="nav-tab active" onclick="switchTab('reports', this)">Reports</div>
+      <div class="nav-tab" onclick="switchTab('server-status', this)">Server Status</div>
+      <div class="nav-tab" onclick="switchTab('vm-adware', this)">VM Wise Adware</div>
+    </div>
+
+    <!-- Reports View (Default) -->
+    <div id="view-reports" class="view-content">
+    <div class="filters-section">
+      <h3>Filters</h3>
+      <div class="filters">
+        <div class="filter-group">
+          <label>Extension</label>
+          <select id="extensionFilter">
+            <option value="">All Extensions</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Extension ID/Name</label>
+          <input type="text" id="extensionIdNameBox" placeholder="Paste or type ID or Name">
+        </div>
+        <div class="filter-group">
+          <label>Network</label>
+          <select id="networkFilter">
+            <option value="">All Networks</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>From Date</label>
+          <div class="input-with-clear">
+            <input type="text" id="fromDate" placeholder="Select date" readonly>
+            <span class="clear-icon" id="clearFromDate" title="Clear date">&#10006;</span>
+          </div>
+        </div>
+        <div class="filter-group">
+          <label>To Date</label>
+          <div class="input-with-clear">
+            <input type="text" id="toDate" placeholder="Select date" readonly>
+            <span class="clear-icon" id="clearToDate" title="Clear date">&#10006;</span>
+          </div>
+        </div>
+        <div class="filter-group">
+          <label>Search</label>
+          <input type="text" id="searchBox" placeholder="Brand, IncidentId, Network...">
+        </div>
+      </div>
+    </div>
+
+    <div class="table-section">
+      <h3>Records</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span></span>
+        <button id="downloadExcelBtn" class="excel-btn">⬇️ Download Excel</button>
+      </div>
+      <div class="table-wrapper">
+        <table id="dataTable">
+          <thead>
+            <tr>
+              <th>Incident</th>
+              <th>Extension</th>
+              <th>Brand</th>
+              <th>Violation</th>
+              <th>Network</th>
+              <th>Video</th>
+              <th>Log</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    </div>
+
+    <!-- Server Status View -->
+    <div id="view-server-status" class="view-content" style="display:none;">
+      <div class="server-status-section">
+        <div class="server-status-block">
+          <h3>Busy Servers</h3>
+          <div id="busyServerStatus" class="server-status-list">Loading...</div>
+        </div>
+        <div class="server-status-block">
+          <h3>Free Servers</h3>
+          <div id="freeServerStatus" class="server-status-list">Loading...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VM Wise Adware View -->
+    <div id="view-vm-adware" class="view-content" style="display:none;">
+    <div class="table-section">
+      <h3>VM Wise Adware</h3>
+      <div class="filters" style="margin-bottom: 20px;">
+        <div class="filter-group">
+          <label>Select Server (VM)</label>
+          <select id="vmFilter">
+            <option value="">All VMs</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Extension Name</label>
+          <select id="vmAdwareExtensionFilter">
+            <option value="">All Extensions</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Extension ID/Name Search</label>
+          <input type="text" id="vmAdwareSearchBox" placeholder="Paste or type ID or Name">
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span></span>
+        <button id="downloadVmAdwareExcelBtn" class="excel-btn">⬇️ Download Excel</button>
+      </div>
+      <div class="table-wrapper">
+        <table id="vmAdwareTable">
+          <thead>
+            <tr>
+              <th>Extension ID</th>
+              <th>Extension Name</th>
+              <th>Browser</th>
+              <th>Created Date</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>
