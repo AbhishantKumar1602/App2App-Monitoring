@@ -23,11 +23,20 @@ const charts = {
   brandNetwork: null,
   typeChart: null,
   networkBrand: null,
+  brandViolation: null,
+  brandTimeline: null,
+  vmBrowser: null,
+  vmTimeline: null,
+  sessionDuration: null,
+  publisherChart: null,
+  couponSiteChart: null,
 };
 
-// ============================================================
-// UTILITY HELPERS
-// ============================================================
+// Server utilization history for sparkline
+const utilHistory = [];
+
+// Matrix click-to-filter state
+let matrixFilter = { brand: null, network: null };
 function esc(val) {
   if (val == null) return "-";
   return String(val)
@@ -130,13 +139,41 @@ function fetchServerStatus() {
       if (freeDiv) freeDiv.innerHTML = free.length === 0 ? "No free servers." : free.map(renderVm).join(" ");
       const ts = document.getElementById("serverStatusTimestamp");
       if (ts) ts.textContent = "Last updated: " + new Date().toLocaleTimeString();
-      // Utilization bar
+
+      // Count labels
+      const busyCount = document.getElementById("busyCount");
+      const freeCount = document.getElementById("freeCount");
+      if (busyCount) busyCount.textContent = `(${busy.length})`;
+      if (freeCount) freeCount.textContent = `(${free.length})`;
+
+      // Color-coded utilization bar
       const utilEl = document.getElementById("serverUtilSummary");
       if (utilEl && list.length > 0) {
         const pct = Math.round((busy.length / list.length) * 100);
+        const color = pct >= 80 ? "#ff4b5c" : pct >= 50 ? "#ffd700" : "#43e97b";
+        const label = pct >= 80 ? "🔴 High Load" : pct >= 50 ? "🟡 Moderate" : "🟢 Low Load";
         utilEl.innerHTML = `
-          <div class="util-bar-wrap"><div class="util-bar" style="width:${pct}%"></div></div>
-          <span class="util-label">${busy.length} / ${list.length} VMs busy (${pct}%)</span>`;
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="color:${color};font-weight:bold;font-size:14px;">${label}</span>
+            <span class="util-label">${busy.length} / ${list.length} VMs busy (${pct}%)</span>
+          </div>
+          <div class="util-bar-wrap"><div class="util-bar" style="width:${pct}%;background:${color};border-radius:6px;height:100%;transition:width 0.6s ease;"></div></div>`;
+
+        // Session history sparkline
+        utilHistory.push(pct);
+        if (utilHistory.length > 10) utilHistory.shift();
+        const historyEl = document.getElementById("serverUtilHistory");
+        const sparkline = document.getElementById("utilSparkline");
+        if (historyEl && utilHistory.length > 1) {
+          historyEl.style.display = "";
+          if (sparkline) {
+            sparkline.innerHTML = utilHistory.map(v => {
+              const c = v >= 80 ? "#ff4b5c" : v >= 50 ? "#ffd700" : "#43e97b";
+              const h = Math.max(4, Math.round(v * 0.3));
+              return `<div class="spark-bar" style="height:${h}px;background:${c};" title="${v}%"></div>`;
+            }).join("");
+          }
+        }
       }
     })
     .catch(() => {
@@ -150,44 +187,66 @@ function fetchServerStatus() {
 // ============================================================
 // MAIN DATA LOAD
 // ============================================================
+function sessionDurationMins(start, end) {
+  const s = parseDate(start), e = parseDate(end);
+  if (!s || !e) return null;
+  const diff = (e - s) / 60000;
+  return diff > 0 && diff < 1440 ? Math.round(diff) : null;
+}
+
 function loadMainData() {
-  setTableMessage("#dataTable tbody", "Loading...", 7);
+  setTableMessage("#dataTable tbody", "Loading...", 6);
   fetch("data.json?t=" + Date.now())
     .then(r => r.json())
     .then(data => {
       state.raw = data
         .filter(r => r && typeof r === "object")
-        .map(r => ({
-          ...r,
-          extensionId: r.extensionId || "",
-          extensionName: r.extensionName || "",
-          keyword: normalizeBrand(r.keyword),
-          networks: r.networks || "",
-          voilationTypeFLP: r.voilationTypeFLP || "",
-          automationStart: r.automationStart || "",
-          incidenceId: r.incidenceId || "",
-          videoFilePath: r.videoFilePath || "",
-          networkLogFilePath: r.networkLogFilePath || "",
-          type: r.type || "",
-          landingUrl: r.landingUrl || "",
-          finalLandingUrl: r.finalLandingUrl || "",
-          redirectionURL: r.redirectionURL || "",
-          redirectionURLFLP: r.redirectionURLFLP || "",
-          brandUrl: r.brandUrl || "",
-          screenShotPath: r.screenShotPath || "",
-          landingScreenshot: r.landingScreenshot || "",
-        }));
+        .map(r => {
+          const dur = sessionDurationMins(r.automationStart, r.automationEnd);
+          return {
+            ...r,
+            extensionId:        r.extensionId        || "",
+            extensionName:      r.extensionName      || "",
+            keyword:            normalizeBrand(r.keyword),
+            networks:           r.networks            || "",
+            voilationTypeFLP:   r.voilationTypeFLP    || "",
+            automationStart:    r.automationStart     || "",
+            automationEnd:      r.automationEnd       || "",
+            sessionDurMins:     dur,
+            incidenceId:        r.incidenceId         || "",
+            videoFilePath:      r.videoFilePath       || "",
+            networkLogFilePath: r.networkLogFilePath  || "",
+            type:               r.type                || "",
+            landingUrl:         r.landingUrl          || "",
+            finalLandingUrl:    r.finalLandingUrl     || "",
+            redirectionURL:     r.redirectionURL      || "",
+            redirectionURLFLP:  r.redirectionURLFLP   || "",
+            redirectionURL2:    r.redirectionURL2     || "",
+            redirectionURL2FLP: r.redirectionURL2FLP  || "",
+            brandUrl:           r.brandUrl            || "",
+            screenShotPath:     r.screenShotPath      || "",
+            landingScreenshot:  r.landingScreenshot   || "",
+            couponSite:         r.couponSite          || "",
+            pubName:            r.pubName             || "",
+            pubValue:           r.pubValue            || "",
+            advName:            r.advName             || "",
+            advValue:           r.advValue            || "",
+            vm:                 r.vm                  || "",
+          };
+        });
       state.raw.sort((a, b) => (parseDate(b.automationStart) || 0) - (parseDate(a.automationStart) || 0));
       fillSelect("extensionFilter", state.raw.map(d => d.extensionName), "All Extensions");
       fillSelect("networkFilter", state.raw.flatMap(d => d.networks ? d.networks.split(",").map(n => n.trim()) : []), "All Networks");
       fillSelect("typeFilter", state.raw.map(d => d.type).filter(Boolean), "All Types");
+      fillSelect("pubFilter", state.raw.map(d => d.pubValue).filter(Boolean), "All Publishers");
+      fillSelect("couponSiteFilter", state.raw.map(d => d.couponSite).filter(Boolean), "All Coupon Sites");
       initializeDatePickers();
       applyFilters();
       initializeBrandData(state.raw);
     })
     .catch(err => {
       console.error("Error loading data:", err);
-      setTableMessage("#dataTable tbody", "Failed to load data.", 7);
+      setTableMessage("#dataTable tbody", "Failed to load data.", 6);
     });
 }
 
@@ -213,6 +272,8 @@ function applyFilters() {
   const extIdName = (document.getElementById("extensionIdNameBox")?.value || "").trim().toLowerCase();
   const network = document.getElementById("networkFilter")?.value || "";
   const typeVal = document.getElementById("typeFilter")?.value || "";
+  const pubVal = document.getElementById("pubFilter")?.value || "";
+  const couponVal = document.getElementById("couponSiteFilter")?.value || "";
   const from = document.getElementById("fromDate")?.value || "";
   const to = document.getElementById("toDate")?.value || "";
   const search = (document.getElementById("searchBox")?.value || "").toLowerCase();
@@ -222,6 +283,8 @@ function applyFilters() {
   if (extIdName) filtered = filtered.filter(d => d.extensionName.toLowerCase().includes(extIdName) || d.extensionId.toLowerCase().includes(extIdName));
   if (network) filtered = filtered.filter(d => d.networks.split(",").map(n => n.trim()).includes(network));
   if (typeVal) filtered = filtered.filter(d => d.type === typeVal);
+  if (pubVal) filtered = filtered.filter(d => d.pubValue === pubVal);
+  if (couponVal) filtered = filtered.filter(d => d.couponSite === couponVal);
   if (from) filtered = filtered.filter(d => d.automationStart >= from);
   if (to) filtered = filtered.filter(d => d.automationStart <= to + "T23:59:59");
   if (search) filtered = filtered.filter(d =>
@@ -230,10 +293,18 @@ function applyFilters() {
     d.networks.toLowerCase().includes(search) ||
     d.incidenceId.toString().includes(search) ||
     d.extensionName.toLowerCase().includes(search) ||
-    d.type.toLowerCase().includes(search)
+    d.type.toLowerCase().includes(search) ||
+    d.pubValue.toLowerCase().includes(search) ||
+    d.couponSite.toLowerCase().includes(search)
   );
 
   state.filtered = filtered;
+  // Apply matrix click filter last
+  if (matrixFilter.brand && matrixFilter.network) {
+    filtered = filtered.filter(d => d.keyword === matrixFilter.brand && d.networks.split(",").map(n=>n.trim()).includes(matrixFilter.network));
+  }
+  state.filtered = filtered;
+  currentPage = 1;
   updateDashboard(filtered);
   renderAnalyticsCharts(filtered);
 }
@@ -246,17 +317,186 @@ function updateDashboard(data) {
   document.getElementById("uniqueExtensions").textContent = new Set(data.map(d => d.extensionId)).size;
   document.getElementById("uniqueBrands").textContent = new Set(data.map(d => d.keyword.toLowerCase())).size;
   document.getElementById("latestDate").textContent = data.length ? fmtDate(data[0].automationStart) : "-";
+
+  // Unique publishers (injected pub IDs)
+  const uniquePubs = new Set(data.map(d => d.pubValue).filter(Boolean));
+  const kpiPubs = document.getElementById("kpiUniquePubs");
+  if (kpiPubs) kpiPubs.textContent = uniquePubs.size;
+  // Top coupon site
+  const couponCounts = {};
+  data.forEach(d => { if (d.couponSite) couponCounts[d.couponSite] = (couponCounts[d.couponSite] || 0) + 1; });
+  const topCoupon = Object.entries(couponCounts).sort((a,b)=>b[1]-a[1])[0];
+  const kpiCoupon = document.getElementById("kpiTopCoupon");
+  if (kpiCoupon) kpiCoupon.innerHTML = topCoupon
+    ? `<span style="color:rgba(255,255,255,0.7);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(new URL(topCoupon[0]).hostname.replace('www.',''))}: ${topCoupon[1]}</span>`
+    : "";
+
+  // Week-over-week for total records
+  const now = new Date();
+  const thisWeekStart = new Date(now); const dow = now.getDay();
+  thisWeekStart.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1)); thisWeekStart.setHours(0,0,0,0);
+  const lastWeekStart = new Date(thisWeekStart); lastWeekStart.setDate(thisWeekStart.getDate() - 7);
+  let thisWk = 0, lastWk = 0;
+  data.forEach(d => {
+    const dt = parseDate(d.automationStart);
+    if (!dt) return;
+    if (dt >= thisWeekStart) thisWk++;
+    else if (dt >= lastWeekStart) lastWk++;
+  });
+  const wkEl = document.getElementById("kpiWeekVsLast");
+  if (wkEl) {
+    const diff = thisWk - lastWk;
+    wkEl.innerHTML = diff > 0 ? `<span class="kpi-sub-up">↑ +${diff} vs last wk</span>` : diff < 0 ? `<span class="kpi-sub-down">↓ ${diff} vs last wk</span>` : `<span class="kpi-sub-flat">→ same as last wk</span>`;
+  }
+  const twEl = document.getElementById("kpiThisWeek");
+  if (twEl) twEl.innerHTML = `<span style="color:rgba(255,255,255,0.7);font-size:11px;">This week: ${thisWk}</span>`;
+
+  // New extensions this week
+  const newExtIds = new Set(); const allExtIds = new Set();
+  data.forEach(d => {
+    allExtIds.add(d.extensionId);
+    const dt = parseDate(d.automationStart);
+    if (dt && dt >= thisWeekStart) newExtIds.add(d.extensionId);
+  });
+  const newExtSub = document.getElementById("kpiNewExtensions");
+  if (newExtSub) newExtSub.innerHTML = `<span style="color:rgba(255,255,255,0.7);font-size:11px;">${newExtIds.size} active this wk</span>`;
+
+  // Active networks count
+  const allNets = new Set();
+  data.forEach(d => { if (d.networks) d.networks.split(",").forEach(n => { if (n.trim()) allNets.add(n.trim()); }); });
+  const netCounts = {};
+  data.forEach(d => { if (d.networks) d.networks.split(",").forEach(n => { const t = n.trim(); if (t) netCounts[t] = (netCounts[t] || 0) + 1; }); });
+  const topNet = Object.entries(netCounts).sort((a,b)=>b[1]-a[1])[0];
+  const kpiNets = document.getElementById("kpiActiveNetworksCount");
+  if (kpiNets) kpiNets.textContent = allNets.size;
+  const kpiTopNet = document.getElementById("kpiTopNetwork");
+  if (kpiTopNet) kpiTopNet.innerHTML = topNet ? `<span style="color:rgba(255,255,255,0.7);font-size:11px;">Top: ${esc(topNet[0])}</span>` : "";
+  const kpiNetSub = document.getElementById("kpiActiveNetworks");
+  if (kpiNetSub) kpiNetSub.innerHTML = `<span style="color:rgba(255,255,255,0.7);font-size:11px;">${allNets.size} networks</span>`;
+
+  // High-risk extension count
+  const riskData = computeExtensionRisk(data);
+  const maxScore = riskData[0]?.score || 1;
+  const highRiskExts = riskData.filter(e => e.score >= maxScore * 0.7);
+  const kpiHR = document.getElementById("kpiHighRisk");
+  if (kpiHR) kpiHR.textContent = highRiskExts.length;
+  const kpiHRSub = document.getElementById("kpiHighRiskSub");
+  if (kpiHRSub) kpiHRSub.innerHTML = `<span style="color:rgba(255,255,255,0.7);font-size:11px;">of ${riskData.length} total</span>`;
+
+  // Affiliate swaps count
+  const swaps = data.filter(r => r.redirectionURL && r.redirectionURLFLP && r.redirectionURL !== r.redirectionURLFLP);
+  const kpiSwap = document.getElementById("kpiSwapCount");
+  if (kpiSwap) kpiSwap.textContent = swaps.length;
+  const swapPct = data.length > 0 ? ((swaps.length / data.length) * 100).toFixed(1) : 0;
+  const kpiSwapPct = document.getElementById("kpiSwapPct");
+  if (kpiSwapPct) kpiSwapPct.innerHTML = `<span style="color:rgba(255,255,255,0.7);font-size:11px;">${swapPct}% of records</span>`;
+
+  // Anomaly detection — spike if today > 2x 7-day avg
+  detectAndShowAnomaly(data, thisWk, lastWk);
+
   renderReportsTable(data);
+}
+
+// ── ANOMALY DETECTION BANNER ───────────────────────────────
+function detectAndShowAnomaly(data, thisWk, lastWk) {
+  const banner = document.getElementById("anomalyBanner");
+  if (!banner) return;
+  const alerts = [];
+
+  // Spike: this week > 2x last week
+  if (lastWk > 0 && thisWk >= lastWk * 2) {
+    alerts.push(`📈 <b>Spike detected:</b> This week has ${thisWk} findings — ${Math.round((thisWk/lastWk)*100)}% of last week (${lastWk}).`);
+  }
+
+  // New extensions (first seen within last 7 days)
+  const now = new Date();
+  const thisWeekStart = new Date(now); const dow = now.getDay();
+  thisWeekStart.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1)); thisWeekStart.setHours(0,0,0,0);
+  const extFirstSeen = {};
+  data.forEach(d => {
+    const dt = parseDate(d.automationStart);
+    if (!dt || !d.extensionId) return;
+    if (!extFirstSeen[d.extensionId] || dt < extFirstSeen[d.extensionId]) extFirstSeen[d.extensionId] = dt;
+  });
+  const brandNewExts = Object.entries(extFirstSeen).filter(([,dt]) => dt >= thisWeekStart);
+  if (brandNewExts.length > 0) {
+    const names = brandNewExts.map(([id]) => {
+      const r = data.find(x => x.extensionId === id);
+      return r ? r.extensionName : id;
+    }).join(", ");
+    alerts.push(`🆕 <span title="${esc(names)}" style="cursor:help;border-bottom:1px dotted rgba(255,255,255,0.5);"><b>${brandNewExts.length} new extension(s)</b></span> detected for the first time this week.`);
+  }
+
+  // Escalating brands: this wk > 2x last wk
+  const brandMap = {};
+  data.forEach(d => {
+    if (!brandMap[d.keyword]) brandMap[d.keyword] = { thisWk: 0, lastWk: 0 };
+    const dt = parseDate(d.automationStart);
+    if (!dt) return;
+    const lastWeekStart2 = new Date(thisWeekStart); lastWeekStart2.setDate(thisWeekStart.getDate() - 7);
+    if (dt >= thisWeekStart) brandMap[d.keyword].thisWk++;
+    else if (dt >= lastWeekStart2) brandMap[d.keyword].lastWk++;
+  });
+  const escalating = Object.entries(brandMap).filter(([,v]) => v.lastWk > 0 && v.thisWk >= v.lastWk * 2).map(([b]) => b);
+  if (escalating.length > 0) {
+    alerts.push(`⚡ <b>Escalating brands:</b> ${escalating.slice(0,3).map(esc).join(", ")}${escalating.length > 3 ? ` +${escalating.length - 3} more` : ""} doubled in findings this week.`);
+  }
+
+  if (alerts.length > 0) {
+    banner.innerHTML = alerts.map(a => `<div class="anomaly-item">⚠️ ${a}</div>`).join("");
+    banner.style.display = "block";
+  } else {
+    banner.style.display = "none";
+  }
 }
 
 const PAGE_SIZE = 100;
 let currentPage = 1;
 
+// ── Builds the evidence button group for a record row ──────
+function buildEvidenceBtns(r) {
+  const payload = JSON.stringify({
+    inc:               r.incidenceId        || "",
+    brand:             r.keyword            || "",
+    video:             r.videoFilePath       || "",
+    log:               r.networkLogFilePath  || "",
+    shot:              r.screenShotPath      || "",
+    landing:           r.landingScreenshot   || "",
+    landingUrl:        r.landingUrl          || "",
+    finalLandingUrl:   r.finalLandingUrl     || "",
+    brandUrl:          r.brandUrl            || "",
+    redirectionURL2:   r.redirectionURL2     || "",
+    redirectionURL2FLP:r.redirectionURL2FLP  || "",
+    couponSite:        r.couponSite          || "",
+    pubName:           r.pubName             || "",
+    pubValue:          r.pubValue            || "",
+    advName:           r.advName             || "",
+    advValue:          r.advValue            || "",
+    durMins:           r.sessionDurMins != null ? r.sessionDurMins : "",
+    violationType:     r.voilationTypeFLP    || "",
+    type:              r.type               || "",
+    network:           r.networks            || "",
+  });
+
+  const hasAny = r.videoFilePath || r.networkLogFilePath || r.screenShotPath || r.landingScreenshot;
+  if (!hasAny) return "";
+
+  const btns = [];
+  if (r.screenShotPath || r.landingScreenshot)
+    btns.push(`<button class="ev-pill ev-pill-img" onclick='openEvidenceModal(${payload})' title="View Screenshots">📸</button>`);
+  if (r.videoFilePath)
+    btns.push(`<button class="ev-pill ev-pill-vid" onclick='openEvidenceModal(${payload})' title="Watch Video">🎬</button>`);
+  if (r.networkLogFilePath)
+    btns.push(`<button class="ev-pill ev-pill-log" onclick='openEvidenceModal(${payload})' title="View SAZ Log">🌐</button>`);
+
+  return `<div class="ev-pills">${btns.join("")}</div>`;
+}
+
 function renderReportsTable(data) {
   const tbody = document.querySelector("#dataTable tbody");
   if (!tbody) return;
   if (data.length === 0) {
-    setTableMessage("#dataTable tbody", "No records match your filters.", 7);
+    setTableMessage("#dataTable tbody", "No records match your filters.", 8);
     renderPagination(0, "#reportsPagination");
     return;
   }
@@ -267,18 +507,26 @@ function renderReportsTable(data) {
   const frag = document.createDocumentFragment();
   pageData.forEach(r => {
     const tr = document.createElement("tr");
-    const videoLink = r.videoFilePath ? `<a href="${esc(r.videoFilePath)}" target="_blank" rel="noopener">View</a>` : "-";
-    const logLink = r.networkLogFilePath ? `<a href="https://app2app.io/sazviewer/?url=${esc(r.networkLogFilePath)}" target="_blank" rel="noopener">View</a>` : "-";
+    const evBtns = buildEvidenceBtns(r);
+
     const iTd = document.createElement("td");
-    iTd.innerHTML = `<div><b>${esc(r.incidenceId || "-")}</b></div><div style="font-size:12px;color:#888;">${esc(fmtDate(r.automationStart))}</div>`;
+    iTd.innerHTML = `<div><b>${esc(r.incidenceId || "-")}</b></div>
+      <div style="font-size:12px;color:#888;">${esc(fmtDate(r.automationStart))}</div>
+      ${r.sessionDurMins !== null && r.sessionDurMins !== undefined ? `<div class="dur-badge" style="margin-top:3px;">${r.sessionDurMins}m</div>` : ""}`;
     const eTd = document.createElement("td");
     eTd.innerHTML = `${esc(r.extensionName || "-")}<br><span style="font-size:12px;color:#888;">${esc(r.extensionId)}</span>`;
     const bTd = document.createElement("td"); bTd.textContent = r.keyword || "-";
-    const vTd = document.createElement("td"); vTd.textContent = r.voilationTypeFLP || "-";
+    const vTd = document.createElement("td");
+    vTd.innerHTML = `<span>${esc(r.voilationTypeFLP || "-")}</span>
+      ${r.type ? `<div style="font-size:11px;color:#888;margin-top:2px;">${esc(r.type)}</div>` : ""}`;
     const nTd = document.createElement("td"); nTd.textContent = r.networks || "-";
-    const viTd = document.createElement("td"); viTd.innerHTML = videoLink;
-    const lTd = document.createElement("td"); lTd.innerHTML = logLink;
-    tr.append(iTd, eTd, bTd, vTd, nTd, viTd, lTd);
+    const pTd = document.createElement("td");
+    pTd.innerHTML = r.pubValue
+      ? `<code class="aff-id-code" style="font-size:11px;">${esc(r.pubValue)}</code>
+         ${r.couponSite ? `<div style="font-size:10px;color:#666;margin-top:2px;">via ${esc((() => { try { return new URL(r.couponSite).hostname.replace("www.",""); } catch(e){ return r.couponSite; }})())}</div>` : ""}`
+      : "-";
+    const evTd = document.createElement("td"); evTd.innerHTML = evBtns || "-";
+    tr.append(iTd, eTd, bTd, vTd, nTd, pTd, evTd);
     frag.appendChild(tr);
   });
   tbody.appendChild(frag);
@@ -319,17 +567,27 @@ function renderAnalyticsCharts(data) {
   renderViolationDonut(data);
   renderNetworkDistChart(data);
   renderTypeChart(data);
+  renderSessionDurationChart(data);
+  renderPublisherChart(data);
+  renderCouponSiteChart(data);
   renderExtensionRiskTable(data);
   renderNetworkBrandMatrix(data);
+  renderPublisherIntelTable(data);
+  renderAdvertiserTable(data);
+  renderCouponSiteTable(data);
   renderAffiliateSwapTable(data);
   renderAffiliateFingerprintTable(data);
 }
 
-// 1. Findings Over Time
+// 1. Findings Over Time — with 7-day rolling avg + cumulative toggle
 function renderTimelineChart(data) {
   destroyChart("timeline");
   const ctx = document.getElementById("timelineChart");
   if (!ctx) return;
+
+  const showRolling = document.getElementById("showRollingAvg")?.checked !== false;
+  const showCumulative = document.getElementById("showCumulative")?.checked === true;
+
   const dateCounts = {};
   data.forEach(r => {
     const d = fmtDate(r.automationStart);
@@ -337,26 +595,72 @@ function renderTimelineChart(data) {
   });
   const labels = Object.keys(dateCounts).sort();
   const values = labels.map(l => dateCounts[l]);
+
+  // 7-day rolling average
+  const rolling = values.map((_, i) => {
+    const window = values.slice(Math.max(0, i - 6), i + 1);
+    return +(window.reduce((s, v) => s + v, 0) / window.length).toFixed(1);
+  });
+
+  // Cumulative
+  let cum = 0;
+  const cumulative = values.map(v => (cum += v, cum));
+
+  // Week-over-week subtitle
+  const total = values.reduce((s, v) => s + v, 0);
+  const recent7 = values.slice(-7).reduce((s, v) => s + v, 0);
+  const prev7 = values.slice(-14, -7).reduce((s, v) => s + v, 0);
+  const subtitleEl = document.getElementById("timelineSubtitle");
+  if (subtitleEl) {
+    const changeStr = prev7 > 0 ? ` · last 7d vs prev 7d: ${recent7 > prev7 ? "+" : ""}${recent7 - prev7}` : "";
+    subtitleEl.textContent = `${total} total findings · ${labels.length} days${changeStr}`;
+  }
+
   const opts = baseOpts();
-  opts.plugins.legend.display = false;
+  opts.plugins.legend.display = showRolling || showCumulative;
   opts.scales.x.ticks.maxTicksLimit = 14;
   opts.scales.x.ticks.maxRotation = 45;
-  charts.timeline = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        label: "Findings",
-        data: values,
-        backgroundColor: "rgba(102,126,234,0.75)",
-        borderColor: "#667eea",
-        borderWidth: 1,
-        borderRadius: 4,
-        hoverBackgroundColor: "#64ffda",
-      }],
-    },
-    options: opts,
+  if (showCumulative) {
+    opts.scales.y1 = { type: "linear", display: true, position: "right", ticks: { color: "#64ffda" }, grid: { drawOnChartArea: false }, title: { display: true, text: "Cumulative", color: "#64ffda" } };
+  }
+
+  const datasets = [{
+    label: "Daily Findings",
+    data: values,
+    backgroundColor: "rgba(102,126,234,0.65)",
+    borderColor: "#667eea",
+    borderWidth: 1,
+    borderRadius: 4,
+    hoverBackgroundColor: "#64ffda",
+    yAxisID: "y",
+  }];
+
+  if (showRolling) datasets.push({
+    label: "7-day Avg",
+    data: rolling,
+    type: "line",
+    borderColor: "#ffd700",
+    borderWidth: 2,
+    pointRadius: 0,
+    tension: 0.4,
+    fill: false,
+    yAxisID: "y",
   });
+
+  if (showCumulative) datasets.push({
+    label: "Cumulative",
+    data: cumulative,
+    type: "line",
+    borderColor: "#64ffda",
+    borderWidth: 1.5,
+    borderDash: [4, 4],
+    pointRadius: 0,
+    tension: 0.4,
+    fill: false,
+    yAxisID: "y1",
+  });
+
+  charts.timeline = new Chart(ctx, { type: "bar", data: { labels, datasets }, options: opts });
 }
 
 // 2. Violation Type Donut
@@ -452,44 +756,273 @@ function renderTypeChart(data) {
   });
 }
 
-// ── NEW: Network × Brand Matrix ───────────────────────────
+// ── Session Duration Distribution ────────────────────────────
+function renderSessionDurationChart(data) {
+  destroyChart("sessionDuration");
+  const ctx = document.getElementById("sessionDurationChart");
+  if (!ctx) return;
+  const buckets = { "<2m": 0, "2-5m": 0, "5-10m": 0, "10-20m": 0, ">20m": 0 };
+  data.forEach(r => {
+    const d = r.sessionDurMins;
+    if (d === null) return;
+    if (d < 2) buckets["<2m"]++;
+    else if (d < 5) buckets["2-5m"]++;
+    else if (d < 10) buckets["5-10m"]++;
+    else if (d < 20) buckets["10-20m"]++;
+    else buckets[">20m"]++;
+  });
+  const labels = Object.keys(buckets);
+  const values = Object.values(buckets);
+  const opts = baseOpts();
+  opts.plugins.legend.display = false;
+  opts.scales.x.title = { display: true, text: "Session Length", color: "#666", font: { size: 11 } };
+  charts.sessionDuration = new Chart(ctx, {
+    type: "bar",
+    data: { labels, datasets: [{ label: "Sessions", data: values, backgroundColor: ["#43e97b","#64ffda","#667eea","#ffd700","#ff6b6b"], borderRadius: 5 }] },
+    options: opts,
+  });
+}
+
+// ── Publisher (injected pub ID) Distribution Chart ────────────
+function renderPublisherChart(data) {
+  destroyChart("publisherChart");
+  const ctx = document.getElementById("publisherChart");
+  if (!ctx) return;
+  const counts = {};
+  data.forEach(r => { if (r.pubValue) counts[r.pubValue] = (counts[r.pubValue] || 0) + 1; });
+  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0, 12);
+  if (!sorted.length) return;
+  const opts = baseOpts();
+  opts.indexAxis = "y";
+  opts.plugins.legend.display = false;
+  charts.publisherChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: sorted.map(([k]) => k),
+      datasets: [{ label: "Injections", data: sorted.map(([,v])=>v), backgroundColor: sorted.map((_,i)=>PALETTE[i%PALETTE.length]), borderRadius: 4 }],
+    },
+    options: opts,
+  });
+}
+
+// ── Coupon Site Source Chart ───────────────────────────────────
+function renderCouponSiteChart(data) {
+  destroyChart("couponSiteChart");
+  const ctx = document.getElementById("couponSiteChart");
+  if (!ctx) return;
+  const counts = {};
+  data.forEach(r => {
+    if (!r.couponSite) return;
+    try { const host = new URL(r.couponSite).hostname.replace("www.",""); counts[host] = (counts[host]||0)+1; }
+    catch(e) { counts[r.couponSite] = (counts[r.couponSite]||0)+1; }
+  });
+  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0, 10);
+  if (!sorted.length) return;
+  charts.couponSiteChart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: sorted.map(([k])=>k),
+      datasets: [{ data: sorted.map(([,v])=>v), backgroundColor: PALETTE, borderColor: "#0f0f23", borderWidth: 2, hoverOffset: 8 }],
+    },
+    options: {
+      ...baseOpts(true), cutout: "60%",
+      plugins: {
+        legend: { position: "right", labels: { color: "#e0e0e0", padding: 10, boxWidth: 12, font: { size: 11 } } },
+        tooltip: { backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0", borderColor: "#2a2a40", borderWidth: 1 },
+      },
+    },
+  });
+}
+
+// ── Publisher Intelligence Table ─────────────────────────────
+// Uses pubValue directly — no regex needed, ground truth from API
+function renderPublisherIntelTable(data) {
+  const tbody = document.querySelector("#publisherIntelTable tbody");
+  if (!tbody) return;
+  const pubMap = {};
+  data.forEach(r => {
+    if (!r.pubValue) return;
+    const key = r.pubValue;
+    if (!pubMap[key]) pubMap[key] = {
+      pubValue: key, pubName: r.pubName,
+      extensions: new Set(), brands: new Set(), networks: new Set(),
+      couponSites: new Set(), count: 0, swapCount: 0,
+    };
+    pubMap[key].extensions.add(r.extensionId);
+    pubMap[key].brands.add(r.keyword);
+    pubMap[key].networks.add(r.networks);
+    if (r.couponSite) pubMap[key].couponSites.add(r.couponSite);
+    pubMap[key].count++;
+    // This pub is in a swap if it's the injected one (pubValue from FLP)
+    if (r.redirectionURL2FLP && r.redirectionURL2FLP.includes(r.pubValue)) pubMap[key].swapCount++;
+  });
+
+  const sorted = Object.values(pubMap).sort((a,b)=>b.extensions.size - a.extensions.size || b.count - a.count);
+  const badge = document.getElementById("pubIntelCount");
+  if (badge) badge.textContent = sorted.length;
+  const multiExtBadge = document.getElementById("pubIntelMultiExt");
+  if (multiExtBadge) multiExtBadge.textContent = sorted.filter(p=>p.extensions.size>1).length;
+
+  if (!sorted.length) { setTableMessage("#publisherIntelTable tbody","No publisher data in current filter.",6); return; }
+
+  tbody.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  sorted.forEach((p, idx) => {
+    const isMultiExt = p.extensions.size > 1;
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    tr.title = `Click to filter to publisher: ${p.pubValue}`;
+    tr.addEventListener("click", () => {
+      const sel = document.getElementById("pubFilter");
+      if (sel) { sel.value = p.pubValue; applyFilters(); }
+    });
+
+    const rankTd = document.createElement("td"); rankTd.innerHTML = `<span class="rank-num">#${idx+1}</span>`;
+    const idTd = document.createElement("td");
+    idTd.innerHTML = `<code class="aff-id-code ${isMultiExt?"aff-suspect":""}">${esc(p.pubValue)}</code>
+      ${p.pubName ? `<span style="font-size:11px;color:#666;margin-left:6px;">(${esc(p.pubName)})</span>` : ""}
+      ${isMultiExt ? `<span class="fraud-badge">⚠️ Multi-ext</span>` : ""}
+      <button class="copy-btn" onclick="event.stopPropagation();copyToClipboard('${p.pubValue.replace(/'/g,"\\'")}',this)" title="Copy">📋</button>`;
+    const extTd = document.createElement("td"); extTd.textContent = p.extensions.size;
+    const brandTd = document.createElement("td"); brandTd.textContent = p.brands.size;
+    const countTd = document.createElement("td");
+    countTd.innerHTML = `<span class="badge">${p.count}</span>`;
+    const couponTd = document.createElement("td");
+    couponTd.innerHTML = [...p.couponSites].slice(0,3).map(s => {
+      try { return `<span class="net-tag">${esc(new URL(s).hostname.replace("www.",""))}</span>`; }
+      catch(e) { return `<span class="net-tag">${esc(s)}</span>`; }
+    }).join(" ") || `<span style="color:#444;">—</span>`;
+    tr.append(rankTd, idTd, extTd, brandTd, countTd, couponTd);
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+}
+
+// ── Advertiser (Merchant) Analysis Table ─────────────────────
+function renderAdvertiserTable(data) {
+  const tbody = document.querySelector("#advertiserTable tbody");
+  if (!tbody) return;
+  const advMap = {};
+  data.forEach(r => {
+    if (!r.advValue) return;
+    const key = r.advValue;
+    if (!advMap[key]) advMap[key] = {
+      advValue: key, advName: r.advName,
+      brands: new Set(), networks: new Set(), extensions: new Set(), count: 0,
+    };
+    advMap[key].brands.add(r.keyword);
+    advMap[key].networks.add(r.networks);
+    advMap[key].extensions.add(r.extensionId);
+    advMap[key].count++;
+  });
+  const sorted = Object.values(advMap).sort((a,b)=>b.count-a.count);
+  const badge = document.getElementById("advertiserCount");
+  if (badge) badge.textContent = sorted.length;
+
+  if (!sorted.length) { setTableMessage("#advertiserTable tbody","No advertiser data in current filter.",5); return; }
+  tbody.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  sorted.forEach((a, idx) => {
+    const tr = document.createElement("tr");
+    const rankTd = document.createElement("td"); rankTd.innerHTML = `<span class="rank-num">#${idx+1}</span>`;
+    const advTd = document.createElement("td");
+    advTd.innerHTML = `<code class="aff-id-code">${esc(a.advValue)}</code>
+      ${a.advName ? `<span style="font-size:11px;color:#666;margin-left:6px;">(${esc(a.advName)})</span>` : ""}
+      <button class="copy-btn" onclick="copyToClipboard('${a.advValue.replace(/'/g,"\\'")}',this)" title="Copy">📋</button>`;
+    const brandTd = document.createElement("td");
+    brandTd.innerHTML = [...a.brands].slice(0,4).map(b=>`<span class="net-tag">${esc(b)}</span>`).join(" ");
+    const netTd = document.createElement("td"); netTd.textContent = [...a.networks].join(", ");
+    const countTd = document.createElement("td"); countTd.innerHTML = `<span class="badge">${a.count}</span>`;
+    tr.append(rankTd, advTd, brandTd, netTd, countTd);
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+}
+
+// ── Coupon Site Attack Surface Table ─────────────────────────
+function renderCouponSiteTable(data) {
+  const tbody = document.querySelector("#couponSiteTable tbody");
+  if (!tbody) return;
+  const siteMap = {};
+  data.forEach(r => {
+    if (!r.couponSite) return;
+    let host;
+    try { host = new URL(r.couponSite).hostname.replace("www.",""); }
+    catch(e) { host = r.couponSite; }
+    if (!siteMap[host]) siteMap[host] = {
+      host, fullUrl: r.couponSite, extensions: new Set(), brands: new Set(), networks: new Set(), count: 0,
+    };
+    siteMap[host].extensions.add(r.extensionId);
+    siteMap[host].brands.add(r.keyword);
+    siteMap[host].networks.add(r.networks);
+    siteMap[host].count++;
+  });
+  const sorted = Object.values(siteMap).sort((a,b)=>b.count-a.count);
+  const badge = document.getElementById("couponSiteCount");
+  if (badge) badge.textContent = sorted.length;
+
+  if (!sorted.length) { setTableMessage("#couponSiteTable tbody","No coupon site data in current filter.",5); return; }
+  tbody.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  sorted.forEach((s, idx) => {
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    tr.title = `Click to filter to coupon site: ${s.host}`;
+    tr.addEventListener("click", () => {
+      const sel = document.getElementById("couponSiteFilter");
+      if (sel) { sel.value = s.fullUrl; applyFilters(); }
+    });
+    const rankTd = document.createElement("td"); rankTd.innerHTML = `<span class="rank-num">#${idx+1}</span>`;
+    const siteTd = document.createElement("td");
+    siteTd.innerHTML = `<a href="${esc(s.fullUrl)}" target="_blank" rel="noopener" class="ev-url-val" style="font-size:13px;">${esc(s.host)}</a>`;
+    const extTd = document.createElement("td"); extTd.textContent = s.extensions.size;
+    const brandTd = document.createElement("td");
+    brandTd.innerHTML = [...s.brands].slice(0,4).map(b=>`<span class="net-tag">${esc(b)}</span>`).join(" ");
+    const countTd = document.createElement("td"); countTd.innerHTML = `<span class="badge">${s.count}</span>`;
+    tr.append(rankTd, siteTd, extTd, brandTd, countTd);
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+}
+
+// ── Network × Brand Matrix — upgraded ───────────────────────
 function renderNetworkBrandMatrix(data) {
   const wrapper = document.getElementById("networkBrandMatrix");
   if (!wrapper) return;
 
-  // Collect all networks and top brands
   const networkSet = new Set();
   const brandCounts = {};
+  const netTotals = {};
   data.forEach(r => {
-    r.networks.split(",").forEach(n => { const net = n.trim(); if (net) networkSet.add(net); });
+    r.networks.split(",").forEach(n => { const net = n.trim(); if (net) { networkSet.add(net); netTotals[net] = (netTotals[net] || 0) + 1; } });
     brandCounts[r.keyword] = (brandCounts[r.keyword] || 0) + 1;
   });
 
-  const networks = [...networkSet].sort();
-  const topBrands = Object.entries(brandCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 12)
-    .map(([b]) => b);
+  // Top 8 networks by total findings
+  const networks = Object.entries(netTotals).sort((a,b) => b[1]-a[1]).slice(0, 8).map(([n]) => n);
+  // Top 12 brands by total findings, sorted by row total desc
+  const topBrands = Object.entries(brandCounts).sort((a,b) => b[1]-a[1]).slice(0, 12).map(([b]) => b);
 
   if (networks.length === 0 || topBrands.length === 0) {
-    wrapper.innerHTML = '<p style="color:#666;padding:16px;">No data available.</p>';
-    return;
+    wrapper.innerHTML = '<p style="color:#666;padding:16px;">No data available.</p>'; return;
   }
 
-  // Build matrix: matrix[brand][network] = count
   const matrix = {};
   topBrands.forEach(b => { matrix[b] = {}; networks.forEach(n => { matrix[b][n] = 0; }); });
   data.forEach(r => {
     if (!matrix[r.keyword]) return;
-    r.networks.split(",").forEach(n => {
-      const net = n.trim();
-      if (net && matrix[r.keyword][net] !== undefined) matrix[r.keyword][net]++;
-    });
+    r.networks.split(",").forEach(n => { const net = n.trim(); if (net && matrix[r.keyword][net] !== undefined) matrix[r.keyword][net]++; });
   });
 
-  // Find max for colour scale
+  // Sort brands by row total descending
+  const sortedBrands = topBrands.slice().sort((a, b) => {
+    const aTotal = networks.reduce((s, n) => s + matrix[a][n], 0);
+    const bTotal = networks.reduce((s, n) => s + matrix[b][n], 0);
+    return bTotal - aTotal;
+  });
+
   let maxVal = 0;
-  topBrands.forEach(b => networks.forEach(n => { if (matrix[b][n] > maxVal) maxVal = matrix[b][n]; }));
+  sortedBrands.forEach(b => networks.forEach(n => { if (matrix[b][n] > maxVal) maxVal = matrix[b][n]; }));
 
   const cellColor = (v) => {
     if (v === 0) return "#0f0f23";
@@ -501,21 +1034,53 @@ function renderNetworkBrandMatrix(data) {
   };
   const textColor = (v) => v === 0 ? "#333" : v / (maxVal || 1) > 0.5 ? "#fff" : "#e0e0e0";
 
-  let html = '<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th class="matrix-corner">Brand \ Network</th>';
-  networks.forEach(n => { html += `<th class="matrix-net">${esc(n)}</th>`; });
-  html += '</tr></thead><tbody>';
-  topBrands.forEach(b => {
+  // Column totals
+  const colTotals = {};
+  networks.forEach(n => { colTotals[n] = sortedBrands.reduce((s, b) => s + matrix[b][n], 0); });
+
+  let html = '<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th class="matrix-corner">Brand \\ Network</th>';
+  networks.forEach(n => { html += `<th class="matrix-net" title="${esc(n)}: ${colTotals[n]} total">${esc(n)}</th>`; });
+  html += '<th class="matrix-net">Total</th></tr></thead><tbody>';
+
+  sortedBrands.forEach(b => {
     const rowTotal = networks.reduce((s, n) => s + matrix[b][n], 0);
     html += `<tr><td class="matrix-brand">${esc(b)}</td>`;
     networks.forEach(n => {
       const v = matrix[b][n];
-      html += `<td class="matrix-cell" style="background:${cellColor(v)};color:${textColor(v)};" title="${esc(b)} × ${esc(n)}: ${v}">${v > 0 ? v : ""}</td>`;
+      const isActive = matrixFilter.brand === b && matrixFilter.network === n;
+      html += `<td class="matrix-cell${isActive ? " matrix-cell-active" : ""}" style="background:${cellColor(v)};color:${textColor(v)};" title="${esc(b)} × ${esc(n)}: ${v}" onclick="matrixCellClick('${esc(b).replace(/'/g,"\\'")}','${esc(n).replace(/'/g,"\\'")}',${v})">${v > 0 ? v : ""}</td>`;
     });
     html += `<td class="matrix-total">${rowTotal}</td></tr>`;
   });
+
+  // Column totals row
+  html += '<tr><td class="matrix-brand" style="color:#64ffda;font-size:12px;">Network Total</td>';
+  networks.forEach(n => { html += `<td class="matrix-total" style="background:rgba(100,255,218,0.05);">${colTotals[n]}</td>`; });
+  const grandTotal = Object.values(colTotals).reduce((s,v)=>s+v,0);
+  html += `<td class="matrix-total" style="color:#ffd700;">${grandTotal}</td></tr>`;
   html += '</tbody></table></div>';
   wrapper.innerHTML = html;
 }
+
+function matrixCellClick(brand, network, count) {
+  if (count === 0) return;
+  const clearBtn = document.getElementById("clearMatrixFilterBtn");
+  if (matrixFilter.brand === brand && matrixFilter.network === network) {
+    // Toggle off
+    matrixFilter = { brand: null, network: null };
+    if (clearBtn) clearBtn.style.display = "none";
+  } else {
+    matrixFilter = { brand, network };
+    if (clearBtn) { clearBtn.style.display = ""; clearBtn.textContent = `✕ Clear: ${brand} × ${network}`; }
+  }
+  applyFilters();
+}
+
+document.getElementById("clearMatrixFilterBtn")?.addEventListener("click", () => {
+  matrixFilter = { brand: null, network: null };
+  document.getElementById("clearMatrixFilterBtn").style.display = "none";
+  applyFilters();
+});
 
 // ── NEW: Affiliate ID Swap Detector ───────────────────────
 function extractAffiliateId(url) {
@@ -545,78 +1110,322 @@ function renderAffiliateSwapTable(data) {
   const tbody = document.querySelector("#affiliateSwapTable tbody");
   if (!tbody) return;
 
-  // Only rows where redirectionURL and redirectionURLFLP both exist and differ
-  const swaps = data.filter(r => r.redirectionURL && r.redirectionURLFLP && r.redirectionURL !== r.redirectionURLFLP);
+  // Use pubValue (ground truth from API) for detection — much more reliable than regex
+  // A swap is confirmed when pubValue (orig publisher) != what's injected in redirectionURL2FLP
+  const swaps = data.filter(r => {
+    if (!r.redirectionURL2 || !r.redirectionURL2FLP) return false;
+    return r.redirectionURL2 !== r.redirectionURL2FLP;
+  }).sort((a,b) => {
+    const aReal = a.pubValue && a.redirectionURL2FLP && !a.redirectionURL2FLP.includes(a.pubValue) ? 1 : 0;
+    const bReal = b.pubValue && b.redirectionURL2FLP && !b.redirectionURL2FLP.includes(b.pubValue) ? 1 : 0;
+    if (bReal !== aReal) return bReal - aReal;
+    return (parseDate(b.automationStart)||0) - (parseDate(a.automationStart)||0);
+  });
+
+  const pct = data.length > 0 ? ((swaps.length / data.length) * 100).toFixed(1) : 0;
+  const swapPctBadge = document.getElementById("swapPctBadge");
+  const swapPctValue = document.getElementById("swapPctValue");
+  if (swapPctBadge) swapPctBadge.style.display = swaps.length > 0 ? "" : "none";
+  if (swapPctValue) swapPctValue.textContent = `${pct}%`;
 
   if (swaps.length === 0) {
-    setTableMessage("#affiliateSwapTable tbody", "No affiliate swap evidence found in current filter.", 5);
+    setTableMessage("#affiliateSwapTable tbody", "No affiliate swap evidence found in current filter.", 7);
+    const badge = document.getElementById("swapCount"); if (badge) badge.textContent = 0;
     return;
   }
 
   tbody.innerHTML = "";
   const frag = document.createDocumentFragment();
   swaps.forEach(r => {
-    const origId = extractAffiliateId(r.redirectionURL) || extractAffiliateParam(r.redirectionURL, "utm_content") || "—";
-    const injId  = extractAffiliateId(r.redirectionURLFLP) || extractAffiliateParam(r.redirectionURLFLP, "utm_content") || "—";
-    const sameId = origId === injId;
+    const origPub = r.pubValue || "—";
+    // Extract the publisher ID injected in redirectionURL2FLP by looking at the id= param (LinkShare pattern)
+    let injPub = "—";
+    try {
+      const u = new URL(r.redirectionURL2FLP);
+      injPub = u.searchParams.get("id") || u.searchParams.get(r.pubName) || "—";
+    } catch(e) {}
+    const isRealSwap = origPub !== "—" && injPub !== "—" && origPub.toLowerCase() !== injPub.toLowerCase();
     const tr = document.createElement("tr");
 
     const incTd = document.createElement("td");
-    incTd.innerHTML = `<b>${esc(r.incidenceId || "-")}</b><div style="font-size:11px;color:#666;">${esc(fmtDate(r.automationStart))}</div>`;
+    incTd.innerHTML = `<b>${esc(r.incidenceId||"-")}</b><div style="font-size:11px;color:#666;">${esc(fmtDate(r.automationStart))}</div>`;
     const extTd = document.createElement("td");
     extTd.innerHTML = `${esc(r.extensionName)}<br><span style="font-size:11px;color:#555;">${esc(r.extensionId)}</span>`;
     const brandTd = document.createElement("td"); brandTd.textContent = r.keyword;
     const netTd = document.createElement("td"); netTd.textContent = r.networks;
-    const swapTd = document.createElement("td");
 
-    if (sameId) {
-      swapTd.innerHTML = `<span style="color:#666;font-size:12px;">Same ID — URL params differ</span>`;
+    // Original publisher (from pubValue field — ground truth)
+    const origTd = document.createElement("td");
+    origTd.innerHTML = `
+      <code class="swap-id">${esc(origPub)}</code>
+      <button class="copy-btn" onclick="copyToClipboard('${esc(origPub).replace(/'/g,"\\'")}',this)" title="Copy">📋</button>
+      <div style="font-size:10px;color:#666;margin-top:3px;" title="${esc(r.redirectionURL2)}">↗ ${esc(r.redirectionURL2?.substring(0,60))}…</div>`;
+
+    // Injected publisher (from redirectionURL2FLP)
+    const injTd = document.createElement("td");
+    if (isRealSwap) {
+      injTd.innerHTML = `
+        <code class="swap-id injected">${esc(injPub)}</code>
+        <button class="copy-btn" onclick="copyToClipboard('${esc(injPub).replace(/'/g,"\\'")}',this)" title="Copy">📋</button>
+        <div style="font-size:10px;color:#666;margin-top:3px;" title="${esc(r.redirectionURL2FLP)}">↗ ${esc(r.redirectionURL2FLP?.substring(0,60))}…</div>`;
     } else {
-      swapTd.innerHTML = `
-        <div class="swap-row">
-          <span class="swap-orig" title="Original: ${esc(r.redirectionURL)}">
-            <span class="swap-label">Original</span>
-            <code class="swap-id">${esc(origId)}</code>
-          </span>
-          <span class="swap-arrow">→</span>
-          <span class="swap-inj" title="Injected: ${esc(r.redirectionURLFLP)}">
-            <span class="swap-label">Injected</span>
-            <code class="swap-id injected">${esc(injId)}</code>
-          </span>
-        </div>`;
+      injTd.innerHTML = `<span style="color:#666;font-size:12px;">Same publisher — params differ</span>
+        <div style="font-size:10px;color:#444;margin-top:3px;" title="${esc(r.redirectionURL2FLP)}">↗ ${esc(r.redirectionURL2FLP?.substring(0,60))}…</div>`;
     }
-    tr.append(incTd, extTd, brandTd, netTd, swapTd);
+
+    const durTd = document.createElement("td");
+    durTd.innerHTML = r.sessionDurMins !== null && r.sessionDurMins !== undefined
+      ? `<span class="dur-badge">${r.sessionDurMins}m</span>` : "-";
+
+    tr.append(incTd, extTd, brandTd, netTd, origTd, injTd, durTd);
     frag.appendChild(tr);
   });
   tbody.appendChild(frag);
 
-  // Update count badge
   const badge = document.getElementById("swapCount");
   if (badge) badge.textContent = swaps.length;
 }
+
+function copyToClipboard(text, btn) {
+  navigator.clipboard?.writeText(text).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = "✅";
+    btn.style.color = "#43e97b";
+    setTimeout(() => { btn.textContent = orig; btn.style.color = ""; }, 1500);
+  }).catch(() => {});
+}
+
+// ============================================================
+// ═══  UNIFIED EVIDENCE VIEWER MODAL  ════════════════════════
+// ============================================================
+
+// params: all fields from buildEvidenceBtns payload
+function openEvidenceModal(params) {
+  const modal  = document.getElementById("evidenceModal");
+  const meta   = document.getElementById("evMeta");
+  const urlBar = document.getElementById("evUrls");
+  const tabBar = document.getElementById("evTabBar");
+  const panels = document.getElementById("evPanels");
+  if (!modal) return;
+
+  // ── Meta header ───────────────────────────────────────────
+  meta.innerHTML = `
+    <span class="ev-brand">${esc(params.brand || "—")}</span>
+    <span class="ev-sep">·</span>
+    <span class="ev-inc">Incident <b>${esc(params.inc || "—")}</b></span>
+    ${params.violationType ? `<span class="ev-vtype ev-vtype-${(params.violationType||"").toLowerCase().replace(/\s+/g,"-")}">${esc(params.violationType)}</span>` : ""}
+    ${params.type ? `<span class="ev-type-badge">${esc(params.type)}</span>` : ""}
+    ${params.durMins !== "" && params.durMins !== undefined ? `<span class="dur-badge">⏱ ${params.durMins}m session</span>` : ""}`;
+
+  // ── URL chain section ─────────────────────────────────────
+  const urlRows = [
+    { label: "Landing URL",        val: params.landingUrl },
+    { label: "Final Landing URL",  val: params.finalLandingUrl },
+    { label: "Redirect URL 2",     val: params.redirectionURL2 },
+    { label: "Redirect URL 2 FLP", val: params.redirectionURL2FLP },
+  ].filter(u => u.val);
+
+  if (urlRows.length > 0) {
+    urlBar.style.display = "";
+    urlBar.innerHTML = urlRows.map(u =>
+      `<div class="ev-url-row">
+        <span class="ev-url-label">${u.icon||"🔗"} ${esc(u.label)}</span>
+        <a class="ev-url-val" href="${esc(u.val)}" target="_blank" rel="noopener" title="${esc(u.val)}">${esc(u.val)}</a>
+        <button class="copy-btn" onclick="copyToClipboard('${u.val.replace(/'/g,"\\'")}',this)" title="Copy">📋</button>
+      </div>`).join("");
+  } else {
+    urlBar.style.display = "none";
+    urlBar.innerHTML = "";
+  }
+
+  // ── Build tabs ────────────────────────────────────────────
+  const tabs = [];
+  if (params.shot || params.landing)  tabs.push({ id: "screenshots", icon: "📸", label: "Screenshots" });
+  if (params.video)                   tabs.push({ id: "video",       icon: "🎬", label: "Video" });
+  if (params.log)                     tabs.push({ id: "sazlog",      icon: "🌐", label: "SAZ Log" });
+  if (tabs.length === 0)              tabs.push({ id: "nodata",      icon: "⚠️", label: "No Evidence" });
+
+  tabBar.innerHTML = tabs.map((t, i) =>
+    `<button class="ev-tab${i === 0 ? " ev-tab-active" : ""}" onclick="switchEvTab('${t.id}',this)">${t.icon} ${t.label}</button>`
+  ).join("");
+
+  // ── Build panels ──────────────────────────────────────────
+  panels.innerHTML = "";
+
+  tabs.forEach((t, i) => {
+    const panel = document.createElement("div");
+    panel.className = "ev-panel" + (i === 0 ? " ev-panel-active" : "");
+    panel.dataset.tab = t.id;
+
+    if (t.id === "screenshots") {
+      panel.innerHTML = buildScreenshotPanel(params.shot, params.landing);
+    } else if (t.id === "video") {
+      panel.innerHTML = buildVideoPanel(params.video);
+    } else if (t.id === "sazlog") {
+      panel.innerHTML = buildSazPanel(params.log);
+    } else {
+      panel.innerHTML = `<div class="ev-empty">No evidence files attached to this record.</div>`;
+    }
+    panels.appendChild(panel);
+  });
+
+  modal.style.display = "flex";
+  document.body.style.overflow = "hidden";
+}
+
+function buildScreenshotPanel(shot, landing) {
+  let html = '<div class="ev-screenshot-grid">';
+  if (shot) {
+    html += `<div class="ev-img-wrap">
+      <div class="ev-img-label">📸 Screenshot</div>
+      <img src="${esc(shot)}" class="ev-img" alt="Screenshot" loading="lazy"
+           onclick="window.open('${esc(shot)}','_blank')"
+           onerror="this.parentNode.innerHTML='<div class=ev-img-err>Image unavailable</div>'">
+    </div>`;
+  }
+  if (landing) {
+    html += `<div class="ev-img-wrap">
+      <div class="ev-img-label">🏠 Landing Screenshot</div>
+      <img src="${esc(landing)}" class="ev-img" alt="Landing Screenshot" loading="lazy"
+           onclick="window.open('${esc(landing)}','_blank')"
+           onerror="this.parentNode.innerHTML='<div class=ev-img-err>Image unavailable</div>'">
+    </div>`;
+  }
+  if (!shot && !landing) html += `<div class="ev-empty">No screenshots available.</div>`;
+  html += "</div>";
+  return html;
+}
+
+function buildVideoPanel(videoUrl) {
+  // Determine if direct video file or external link
+  const isDirectVideo = /\.(mp4|webm|ogg|mov)(\?|$)/i.test(videoUrl);
+  if (isDirectVideo) {
+    return `
+      <div class="ev-video-wrap">
+        <video class="ev-video" controls autoplay preload="metadata" controlsList="nodownload">
+          <source src="${esc(videoUrl)}" type="video/mp4">
+          <source src="${esc(videoUrl)}" type="video/webm">
+          Your browser does not support the video tag.
+        </video>
+        <div class="ev-video-actions">
+          <a href="${esc(videoUrl)}" target="_blank" rel="noopener" class="ev-action-btn">↗ Open in new tab</a>
+          <a href="${esc(videoUrl)}" download class="ev-action-btn">⬇ Download</a>
+        </div>
+      </div>`;
+  } else {
+    // Non-direct URL (e.g. a stream or external viewer)
+    return `
+      <div class="ev-video-wrap">
+        <div class="ev-video-external">
+          <div style="font-size:48px;margin-bottom:16px;">🎬</div>
+          <p style="color:#b0b0b0;margin-bottom:20px;">This video is hosted externally and cannot be embedded directly.</p>
+          <a href="${esc(videoUrl)}" target="_blank" rel="noopener" class="ev-action-btn ev-action-btn-primary">↗ Open Video</a>
+        </div>
+      </div>`;
+  }
+}
+
+function buildSazPanel(logUrl) {
+  // The SAZ viewer is already a web app — embed it in an iframe
+  const viewerUrl = logUrl.startsWith("http") ? `https://app2app.io/sazviewer/?url=${encodeURIComponent(logUrl)}` : logUrl;
+  return `
+    <div class="ev-saz-wrap">
+      <div class="ev-saz-toolbar">
+        <span style="color:#64ffda;font-size:13px;font-weight:600;">🌐 SAZ Network Log</span>
+        <div style="display:flex;gap:8px;">
+          <button class="copy-btn ev-action-btn" onclick="copyToClipboard('${esc(logUrl).replace(/'/g,"\\'")}',this)" style="font-size:12px;">📋 Copy URL</button>
+          <a href="${esc(viewerUrl)}" target="_blank" rel="noopener" class="ev-action-btn">↗ Open in new tab</a>
+        </div>
+      </div>
+      <iframe
+        src="${esc(viewerUrl)}"
+        class="ev-saz-iframe"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        loading="lazy"
+        title="SAZ Log Viewer">
+      </iframe>
+      <div class="ev-saz-fallback" id="sazFallback" style="display:none;">
+        <p style="color:#b0b0b0;margin-bottom:16px;">If the viewer doesn't load, open it directly:</p>
+        <a href="${esc(viewerUrl)}" target="_blank" rel="noopener" class="ev-action-btn ev-action-btn-primary">↗ Open SAZ Viewer</a>
+      </div>
+    </div>`;
+}
+
+function switchEvTab(tabId, btn) {
+  document.querySelectorAll(".ev-tab").forEach(t => t.classList.remove("ev-tab-active"));
+  document.querySelectorAll(".ev-panel").forEach(p => p.classList.remove("ev-panel-active"));
+  if (btn) btn.classList.add("ev-tab-active");
+  const panel = document.querySelector(`.ev-panel[data-tab="${tabId}"]`);
+  if (panel) panel.classList.add("ev-panel-active");
+}
+
+function closeEvidenceModal(e) {
+  if (e && e.target !== document.getElementById("evidenceModal")) return;
+  _stopEvidenceMedia();
+  document.getElementById("evidenceModal").style.display = "none";
+  document.body.style.overflow = "";
+}
+
+function _stopEvidenceMedia() {
+  // Stop any playing video to prevent audio continuing in background
+  document.querySelectorAll("#evidenceModal video").forEach(v => { v.pause(); v.currentTime = 0; });
+  // Clear iframes to stop network log from loading
+  document.querySelectorAll("#evidenceModal iframe").forEach(f => { f.src = "about:blank"; });
+}
+
+// Keyboard support — Escape closes modal
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    const modal = document.getElementById("evidenceModal");
+    if (modal && modal.style.display !== "none") {
+      _stopEvidenceMedia();
+      modal.style.display = "none";
+      document.body.style.overflow = "";
+    }
+  }
+});
+
+// Keep backward compat for openLightbox calls from gallery thumbs
+function openLightbox(params) {
+  openEvidenceModal({
+    inc: params.inc,
+    brand: params.brand,
+    shot: params.shot,
+    landing: params.landing,
+  });
+}
+function closeLightbox(e) { closeEvidenceModal(e); }
 
 // ── NEW: Affiliate Fingerprint (injected ID clusters) ─────
 function renderAffiliateFingerprintTable(data) {
   const tbody = document.querySelector("#affiliateFingerprintTable tbody");
   if (!tbody) return;
 
-  // Group by injected affiliate ID across records
+  // Group by injected pub ID from redirectionURL2FLP — extract id= param (LinkShare/Rakuten pattern)
+  // Fall back to pubValue if extraction fails (pubValue is the ORIGINAL — just for reference)
   const fingerprintMap = {};
   data.forEach(r => {
-    if (!r.redirectionURLFLP) return;
-    const injId = extractAffiliateId(r.redirectionURLFLP) || extractAffiliateParam(r.redirectionURLFLP, "utm_content");
-    if (!injId || injId === "—") return;
-    if (!fingerprintMap[injId]) fingerprintMap[injId] = { id: injId, extensions: new Set(), brands: new Set(), networks: new Set(), count: 0 };
+    if (!r.redirectionURL2FLP) return;
+    let injId = null;
+    try {
+      const u = new URL(r.redirectionURL2FLP);
+      injId = u.searchParams.get("id") || u.searchParams.get(r.pubName) || null;
+    } catch(e) {}
+    if (!injId) return;
+    if (!fingerprintMap[injId]) fingerprintMap[injId] = {
+      id: injId, extensions: new Set(), brands: new Set(), networks: new Set(), count: 0, couponSites: new Set(),
+    };
     fingerprintMap[injId].extensions.add(r.extensionId);
     fingerprintMap[injId].brands.add(r.keyword);
     fingerprintMap[injId].networks.add(r.networks);
+    if (r.couponSite) fingerprintMap[injId].couponSites.add(r.couponSite);
     fingerprintMap[injId].count++;
   });
 
   const sorted = Object.values(fingerprintMap).sort((a, b) => b.extensions.size - a.extensions.size || b.count - a.count);
 
   if (sorted.length === 0) {
-    setTableMessage("#affiliateFingerprintTable tbody", "No affiliate fingerprint data in current filter.", 5);
+    setTableMessage("#affiliateFingerprintTable tbody", "No injected affiliate IDs found in current filter.", 6);
     return;
   }
 
@@ -624,17 +1433,24 @@ function renderAffiliateFingerprintTable(data) {
   const frag = document.createDocumentFragment();
   sorted.forEach((fp, idx) => {
     const tr = document.createElement("tr");
-    const isSuspect = fp.extensions.size > 1; // same affiliate ID used by multiple extensions = coordinated fraud signal
+    const isSuspect = fp.extensions.size > 1;
 
     const rankTd = document.createElement("td"); rankTd.innerHTML = `<span class="rank-num">#${idx + 1}</span>`;
     const idTd = document.createElement("td");
-    idTd.innerHTML = `<code class="aff-id-code ${isSuspect ? "aff-suspect" : ""}">${esc(fp.id)}</code>${isSuspect ? ' <span class="fraud-badge">⚠️ Multi-ext</span>' : ''}`;
+    idTd.innerHTML = `<code class="aff-id-code ${isSuspect ? "aff-suspect" : ""}">${esc(fp.id)}</code>
+      ${isSuspect ? ' <span class="fraud-badge">⚠️ Multi-ext</span>' : ''}
+      <button class="copy-btn" onclick="copyToClipboard('${esc(fp.id).replace(/'/g,"\\'")}',this)" title="Copy">📋</button>`;
     const extTd = document.createElement("td"); extTd.textContent = fp.extensions.size;
     const brandTd = document.createElement("td"); brandTd.textContent = fp.brands.size;
     const countTd = document.createElement("td"); countTd.textContent = fp.count;
+    const couponTd = document.createElement("td");
+    couponTd.innerHTML = [...fp.couponSites].slice(0,3).map(s => {
+      try { return `<span class="net-tag">${esc(new URL(s).hostname.replace("www.",""))}</span>`; }
+      catch(e) { return `<span class="net-tag">${esc(s)}</span>`; }
+    }).join(" ") || "-";
     const netTd = document.createElement("td");
     netTd.innerHTML = [...fp.networks].map(n => `<span class="net-tag">${esc(n)}</span>`).join(" ");
-    tr.append(rankTd, idTd, extTd, brandTd, countTd, netTd);
+    tr.append(rankTd, idTd, extTd, brandTd, countTd, couponTd, netTd);
     frag.appendChild(tr);
   });
   tbody.appendChild(frag);
@@ -643,6 +1459,8 @@ function renderAffiliateFingerprintTable(data) {
   if (badge) badge.textContent = sorted.length;
   const suspectBadge = document.getElementById("suspectCount");
   if (suspectBadge) suspectBadge.textContent = sorted.filter(f => f.extensions.size > 1).length;
+  const kpiFP = document.getElementById("kpiFingerprintSuspect");
+  if (kpiFP) kpiFP.textContent = sorted.filter(f => f.extensions.size > 1).length;
 }
 
 // 4. Extension Risk Score
@@ -674,27 +1492,39 @@ function renderExtensionRiskTable(data) {
   const tbody = document.querySelector("#extensionRiskTable tbody");
   if (!tbody) return;
   const riskData = computeExtensionRisk(data).slice(0, 20);
-  if (riskData.length === 0) { setTableMessage("#extensionRiskTable tbody", "No data available.", 5); return; }
+  if (riskData.length === 0) { setTableMessage("#extensionRiskTable tbody", "No data available.", 6); return; }
   const maxScore = riskData[0].score || 1;
   tbody.innerHTML = "";
   const frag = document.createDocumentFragment();
   riskData.forEach((ext, idx) => {
     const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    tr.title = `Click to filter records to ${ext.name}`;
+    tr.addEventListener("click", () => {
+      const box = document.getElementById("extensionIdNameBox");
+      if (box) { box.value = ext.id; applyFilters(); }
+      // scroll to records table
+      document.getElementById("dataTable")?.scrollIntoView({ behavior: "smooth" });
+    });
     const lvl = ext.score >= maxScore * 0.7 ? "risk-high" : ext.score >= maxScore * 0.35 ? "risk-med" : "risk-low";
     const lbl = ext.score >= maxScore * 0.7 ? "HIGH" : ext.score >= maxScore * 0.35 ? "MED" : "LOW";
     const pct = Math.round((ext.score / maxScore) * 100);
+    const avgW = (ext.violations.reduce((s, v) => s + getViolationWeight(v), 0) / (ext.violations.length || 1)).toFixed(2);
+    const formula = `Score = ${ext.uniqueBrands} brands × ${avgW} avg weight × log(${ext.findings} findings) = ${ext.score}`;
     const rankTd = document.createElement("td"); rankTd.innerHTML = `<span class="rank-num">#${idx + 1}</span>`;
     const nameTd = document.createElement("td"); nameTd.innerHTML = `<b>${esc(ext.name)}</b><br><span style="font-size:11px;color:#666;">${esc(ext.id)}</span>`;
     const fTd = document.createElement("td"); fTd.textContent = ext.findings;
     const bTd = document.createElement("td"); bTd.textContent = ext.uniqueBrands;
+    const nTd = document.createElement("td"); nTd.textContent = ext.uniqueNetworks;
     const sTd = document.createElement("td");
+    sTd.title = formula;
     sTd.innerHTML = `
       <div class="risk-score-wrap">
         <span class="risk-badge ${lvl}">${lbl}</span>
         <div class="risk-bar-bg"><div class="risk-bar-fill ${lvl}" style="width:${pct}%"></div></div>
         <span class="risk-num">${ext.score}</span>
       </div>`;
-    tr.append(rankTd, nameTd, fTd, bTd, sTd);
+    tr.append(rankTd, nameTd, fTd, bTd, nTd, sTd);
     frag.appendChild(tr);
   });
   tbody.appendChild(frag);
@@ -869,8 +1699,11 @@ function showBrandDetails(brandItem) {
   if (detailSection) { detailSection.style.display = "block"; detailSection.scrollIntoView({ behavior: "smooth", block: "start" }); }
   if (summaryTable) summaryTable.style.display = "none";
   if (summaryChart) summaryChart.style.display = "none";
-  updateBrandDetailsTable(brandItem.brand, brandItem.findings);
+  updateBrandDetailsTable(brandItem.brand, brandItem.findings, brandItem);
   renderBrandNetworkMiniChart(brandItem.findings, brandItem.brand);
+  renderBrandViolationChart(brandItem.findings, brandItem.brand);
+  renderBrandTimeline(brandItem.findings);
+  renderBrandScreenshots(brandItem.findings);
 }
 
 function closeBrandDetails() {
@@ -882,27 +1715,36 @@ function closeBrandDetails() {
   if (summaryChart) summaryChart.style.display = "";
 }
 
-function updateBrandDetailsTable(brandName, findings) {
+function updateBrandDetailsTable(brandName, findings, brandItem) {
   state.filteredBrandDetails = findings;
   const tbody = document.querySelector("#brandDetailsTable tbody");
   if (!tbody) return;
   const uniqueExts = new Set(findings.map(f => f.extensionId)).size;
   const infoEl = document.getElementById("brandDetailInfo");
   if (infoEl) infoEl.textContent = `${brandName}: ${findings.length} findings across ${uniqueExts} extension(s)`;
-  if (findings.length === 0) { setTableMessage("#brandDetailsTable tbody", "No findings found.", 6); return; }
+
+  // Escalation banner
+  const escBanner = document.getElementById("brandEscalationBanner");
+  if (escBanner && brandItem) {
+    const { thisWeek, lastWeek } = brandItem.trend;
+    if (lastWeek > 0 && thisWeek >= lastWeek * 2) {
+      escBanner.style.display = "block";
+      escBanner.innerHTML = `<span class="anomaly-item" style="font-size:13px;">⚡ <b>Escalating:</b> This week has ${thisWeek} findings vs ${lastWeek} last week (${Math.round(thisWeek/lastWeek*100)}% increase). Investigate urgently.</span>`;
+    } else { escBanner.style.display = "none"; }
+  }
+
+  if (findings.length === 0) { setTableMessage("#brandDetailsTable tbody", "No findings found.", 5); return; }
   tbody.innerHTML = "";
   const frag = document.createDocumentFragment();
   findings.forEach(r => {
     const tr = document.createElement("tr");
-    const videoLink = r.videoFilePath ? `<a href="${esc(r.videoFilePath)}" target="_blank" rel="noopener">View</a>` : "-";
-    const logLink = r.networkLogFilePath ? `<a href="https://app2app.io/sazviewer/?url=${esc(r.networkLogFilePath)}" target="_blank" rel="noopener">View</a>` : "-";
+    const evBtns = buildEvidenceBtns(r);
     const iTd = document.createElement("td"); iTd.innerHTML = `<div><b>${esc(r.incidenceId || "-")}</b></div><div style="font-size:12px;color:#888;">${esc(fmtDate(r.automationStart))}</div>`;
     const eTd = document.createElement("td"); eTd.innerHTML = `${esc(r.extensionName || "-")}<br><span style="font-size:12px;color:#888;">${esc(r.extensionId)}</span>`;
     const vTd = document.createElement("td"); vTd.textContent = r.voilationTypeFLP || "-";
     const nTd = document.createElement("td"); nTd.textContent = r.networks || "-";
-    const viTd = document.createElement("td"); viTd.innerHTML = videoLink;
-    const lTd = document.createElement("td"); lTd.innerHTML = logLink;
-    tr.append(iTd, eTd, vTd, nTd, viTd, lTd);
+    const evTd = document.createElement("td"); evTd.innerHTML = evBtns || "-";
+    tr.append(iTd, eTd, vTd, nTd, evTd);
     frag.appendChild(tr);
   });
   tbody.appendChild(frag);
@@ -934,6 +1776,74 @@ function renderBrandNetworkMiniChart(findings, brandName) {
         tooltip: { backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0", borderColor: "#2a2a40", borderWidth: 1 },
       },
     },
+  });
+}
+
+// Brand detail — violation type donut
+function renderBrandViolationChart(findings, brandName) {
+  destroyChart("brandViolation");
+  const ctx = document.getElementById("brandViolationChart");
+  if (!ctx) return;
+  const counts = {};
+  findings.forEach(f => { const v = f.voilationTypeFLP || "Unknown"; counts[v] = (counts[v] || 0) + 1; });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  if (sorted.length === 0) return;
+  charts.brandViolation = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: sorted.map(([k]) => k),
+      datasets: [{ data: sorted.map(([, v]) => v), backgroundColor: PALETTE.slice(4), borderColor: "#0f0f23", borderWidth: 2 }],
+    },
+    options: {
+      ...baseOpts(true),
+      cutout: "55%",
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#e0e0e0", padding: 10, boxWidth: 12, font: { size: 11 } } },
+        title: { display: true, text: `Violations — ${brandName}`, color: "#64ffda", font: { size: 13 } },
+        tooltip: { backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0", borderColor: "#2a2a40", borderWidth: 1 },
+      },
+    },
+  });
+}
+
+// Brand detail — findings timeline
+function renderBrandTimeline(findings) {
+  destroyChart("brandTimeline");
+  const ctx = document.getElementById("brandTimelineChart");
+  if (!ctx) return;
+  const dateCounts = {};
+  findings.forEach(f => { const d = fmtDate(f.automationStart); if (d !== "-") dateCounts[d] = (dateCounts[d] || 0) + 1; });
+  const labels = Object.keys(dateCounts).sort();
+  const values = labels.map(l => dateCounts[l]);
+  const opts = baseOpts();
+  opts.plugins.legend.display = false;
+  opts.scales.x.ticks.maxTicksLimit = 10;
+  opts.scales.x.ticks.maxRotation = 40;
+  charts.brandTimeline = new Chart(ctx, {
+    type: "bar",
+    data: { labels, datasets: [{ label: "Findings", data: values, backgroundColor: "rgba(100,255,218,0.5)", borderColor: "#64ffda", borderWidth: 1, borderRadius: 3 }] },
+    options: opts,
+  });
+}
+
+// Brand detail — screenshot gallery
+function renderBrandScreenshots(findings) {
+  const gallery = document.getElementById("brandScreenshotGallery");
+  const grid = document.getElementById("brandScreenshotGrid");
+  if (!gallery || !grid) return;
+  const shots = findings.filter(f => f.screenShotPath || f.landingScreenshot).slice(0, 12);
+  if (shots.length === 0) { gallery.style.display = "none"; return; }
+  gallery.style.display = "";
+  grid.innerHTML = "";
+  shots.forEach(r => {
+    [r.screenShotPath, r.landingScreenshot].filter(Boolean).forEach((src, i) => {
+      const wrap = document.createElement("div");
+      wrap.className = "gallery-thumb";
+      wrap.innerHTML = `<img src="${esc(src)}" alt="Screenshot" loading="lazy" onerror="this.style.display='none'">
+        <div class="gallery-caption">${esc(r.incidenceId)} · ${i === 0 ? "Screenshot" : "Landing"}</div>`;
+      wrap.addEventListener("click", () => openLightbox({ inc: r.incidenceId, brand: r.keyword, shot: r.screenShotPath, landing: r.landingScreenshot }));
+      grid.appendChild(wrap);
+    });
   });
 }
 
@@ -1015,6 +1925,57 @@ function renderVmAdwareChart(data) {
     },
     options: opts,
   });
+
+  // Browser donut
+  destroyChart("vmBrowser");
+  const bCtx = document.getElementById("vmBrowserChart");
+  if (bCtx) {
+    const bCounts = {};
+    data.forEach(r => { const b = r.browser || "Unknown"; bCounts[b] = (bCounts[b] || 0) + 1; });
+    const bSorted = Object.entries(bCounts).sort((a,b) => b[1]-a[1]);
+    if (bSorted.length > 0) {
+      charts.vmBrowser = new Chart(bCtx, {
+        type: "doughnut",
+        data: {
+          labels: bSorted.map(([k]) => k),
+          datasets: [{ data: bSorted.map(([,v]) => v), backgroundColor: PALETTE.slice(3), borderColor: "#0f0f23", borderWidth: 2, hoverOffset: 8 }],
+        },
+        options: {
+          ...baseOpts(true), cutout: "60%",
+          plugins: {
+            legend: { position: "bottom", labels: { color: "#e0e0e0", padding: 10, boxWidth: 12, font: { size: 11 } } },
+            tooltip: { backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0", borderColor: "#2a2a40", borderWidth: 1 },
+          },
+        },
+      });
+    }
+  }
+
+  // VM Adware Timeline
+  destroyChart("vmTimeline");
+  const tCtx = document.getElementById("vmAdwareTimelineChart");
+  if (tCtx) {
+    const dateCounts = {};
+    data.forEach(r => {
+      if (r.createddate) {
+        const d = r.createddate.split(" ")[0];
+        dateCounts[d] = (dateCounts[d] || 0) + 1;
+      }
+    });
+    const labels = Object.keys(dateCounts).sort();
+    const values = labels.map(l => dateCounts[l]);
+    if (labels.length > 0) {
+      const opts2 = baseOpts();
+      opts2.plugins.legend.display = false;
+      opts2.scales.x.ticks.maxTicksLimit = 12;
+      opts2.scales.x.ticks.maxRotation = 40;
+      charts.vmTimeline = new Chart(tCtx, {
+        type: "bar",
+        data: { labels, datasets: [{ label: "Adware Installations", data: values, backgroundColor: "rgba(161,143,255,0.65)", borderColor: "#a18fff", borderWidth: 1, borderRadius: 3 }] },
+        options: opts2,
+      });
+    }
+  }
 }
 
 // ============================================================
@@ -1093,6 +2054,8 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("extensionFilter")?.addEventListener("change", applyFilters);
   document.getElementById("networkFilter")?.addEventListener("change", applyFilters);
   document.getElementById("typeFilter")?.addEventListener("change", applyFilters);
+  document.getElementById("pubFilter")?.addEventListener("change", applyFilters);
+  document.getElementById("couponSiteFilter")?.addEventListener("change", applyFilters);
   document.getElementById("searchBox")?.addEventListener("input", applyFilters);
   document.getElementById("extensionIdNameBox")?.addEventListener("input", applyFilters);
   document.getElementById("brandSearchBox")?.addEventListener("input", applyBrandFilters);
@@ -1100,15 +2063,31 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("vmAdwareExtensionFilter")?.addEventListener("change", applyVmAdwareFilters);
   document.getElementById("vmAdwareSearchBox")?.addEventListener("input", applyVmAdwareFilters);
 
+  // Timeline toggles
+  document.getElementById("showRollingAvg")?.addEventListener("change", () => renderTimelineChart(state.filtered.length ? state.filtered : state.raw));
+  document.getElementById("showCumulative")?.addEventListener("change", () => renderTimelineChart(state.filtered.length ? state.filtered : state.raw));
+
+  // Matrix filter clear
+  document.getElementById("clearMatrixFilterBtn")?.addEventListener("click", () => {
+    matrixFilter = { brand: null, network: null };
+    document.getElementById("clearMatrixFilterBtn").style.display = "none";
+    applyFilters();
+  });
+
   document.getElementById("downloadExcelBtn")?.addEventListener("click", () => {
     exportToExcel(state.filtered.length ? state.filtered : state.raw, [
       ["Incidence Id","incidenceId"],["Extension Id","extensionId"],["Extension Name","extensionName"],
-      ["Brand","keyword"],["Violation","voilationTypeFLP"],["Video File Path","videoFilePath"],
-      ["Screen Shot Path","screenShotPath"],["Network Log File Path","networkLogFilePath"],
-      ["Landing Url","landingUrl"],["Type","type"],["Landing Screenshot","landingScreenshot"],
-      ["Brand Url","brandUrl"],["Final Landing Url","finalLandingUrl"],
+      ["Brand","keyword"],["Violation","voilationTypeFLP"],["Type","type"],
+      ["Networks","networks"],["Publisher ID","pubValue"],["Publisher Param","pubName"],
+      ["Advertiser ID","advValue"],["Advertiser Param","advName"],
+      ["Coupon Site","couponSite"],["Session Duration (mins)","sessionDurMins"],
+      ["Video File Path","videoFilePath"],["Screen Shot Path","screenShotPath"],
+      ["Network Log File Path","networkLogFilePath"],["Landing Url","landingUrl"],
+      ["Landing Screenshot","landingScreenshot"],["Brand Url","brandUrl"],
+      ["Final Landing Url","finalLandingUrl"],
       ["Redirection URL","redirectionURL"],["Redirection URL FLP","redirectionURLFLP"],
-      ["Networks","networks"],["Started Date","automationStart"],
+      ["Redirection URL2","redirectionURL2"],["Redirection URL2 FLP","redirectionURL2FLP"],
+      ["Started Date","automationStart"],["End Date","automationEnd"],
     ], "Records", "extension_records.xlsx");
   });
 

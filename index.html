@@ -20,14 +20,20 @@
   </div>
 
   <!-- ══════════════════════════════════════════════
+       ANOMALY ALERT BANNER
+  ══════════════════════════════════════════════ -->
+  <div id="anomalyBanner" class="anomaly-banner" style="display:none;"></div>
+
+  <!-- ══════════════════════════════════════════════
        KPI CARDS
   ══════════════════════════════════════════════ -->
-  <div class="cards">
+  <div class="cards cards-9">
     <div class="card card-purple">
       <div class="card-icon">📋</div>
       <div class="card-content">
         <div class="card-value" id="totalRecords">0</div>
         <div class="card-label">Total Records</div>
+        <div class="card-sub" id="kpiWeekVsLast">—</div>
       </div>
     </div>
     <div class="card card-blue">
@@ -35,6 +41,7 @@
       <div class="card-content">
         <div class="card-value" id="uniqueExtensions">0</div>
         <div class="card-label">Extensions</div>
+        <div class="card-sub" id="kpiNewExtensions">—</div>
       </div>
     </div>
     <div class="card card-orange">
@@ -42,6 +49,31 @@
       <div class="card-content">
         <div class="card-value" id="uniqueBrands">0</div>
         <div class="card-label">Unique Brands</div>
+        <div class="card-sub" id="kpiActiveNetworks">—</div>
+      </div>
+    </div>
+    <div class="card card-red">
+      <div class="card-icon">🚨</div>
+      <div class="card-content">
+        <div class="card-value" id="kpiHighRisk">0</div>
+        <div class="card-label">High-Risk Ext.</div>
+        <div class="card-sub" id="kpiHighRiskSub">—</div>
+      </div>
+    </div>
+    <div class="card card-yellow">
+      <div class="card-icon">🔄</div>
+      <div class="card-content">
+        <div class="card-value" id="kpiSwapCount">0</div>
+        <div class="card-label">Affiliate Swaps</div>
+        <div class="card-sub" id="kpiSwapPct">—</div>
+      </div>
+    </div>
+    <div class="card card-teal">
+      <div class="card-icon">🌐</div>
+      <div class="card-content">
+        <div class="card-value" id="kpiActiveNetworksCount">0</div>
+        <div class="card-label">Active Networks</div>
+        <div class="card-sub" id="kpiTopNetwork">—</div>
       </div>
     </div>
     <div class="card card-green">
@@ -49,6 +81,23 @@
       <div class="card-content">
         <div class="card-value" id="latestDate">-</div>
         <div class="card-label">Latest Date</div>
+        <div class="card-sub" id="kpiThisWeek">—</div>
+      </div>
+    </div>
+    <div class="card card-indigo">
+      <div class="card-icon">🕵️</div>
+      <div class="card-content">
+        <div class="card-value" id="kpiUniquePubs">0</div>
+        <div class="card-label">Unique Publishers</div>
+        <div class="card-sub" id="kpiTopCoupon">—</div>
+      </div>
+    </div>
+    <div class="card card-purple" style="background:linear-gradient(135deg,#2d1b69 0%,#1a0a40 100%);">
+      <div class="card-icon">⚠️</div>
+      <div class="card-content">
+        <div class="card-value" id="kpiFingerprintSuspect">0</div>
+        <div class="card-label">Multi-Ext Pub IDs</div>
+        <div class="card-sub" id="kpiFingerprintSub">Coordinated fraud signals</div>
       </div>
     </div>
   </div>
@@ -103,8 +152,16 @@
           <select id="typeFilter"><option value="">All Types</option></select>
         </div>
         <div class="filter-group">
+          <label>Publisher ID</label>
+          <select id="pubFilter"><option value="">All Publishers</option></select>
+        </div>
+        <div class="filter-group">
+          <label>Coupon Site</label>
+          <select id="couponSiteFilter"><option value="">All Coupon Sites</option></select>
+        </div>
+        <div class="filter-group">
           <label>Search</label>
-          <input type="text" id="searchBox" placeholder="Brand, Incident, Network, Extension, Type...">
+          <input type="text" id="searchBox" placeholder="Brand, Incident, Network, Extension, Publisher...">
         </div>
       </div>
     </div>
@@ -116,7 +173,11 @@
       <div class="chart-card chart-wide">
         <div class="chart-header">
           <span class="chart-title">📈 Findings Over Time</span>
-          <span class="chart-sub">Daily incident count</span>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <span class="chart-sub" id="timelineSubtitle">Daily incident count</span>
+            <label class="toggle-label"><input type="checkbox" id="showRollingAvg" checked> 7-day avg</label>
+            <label class="toggle-label"><input type="checkbox" id="showCumulative"> Cumulative</label>
+          </div>
         </div>
         <div class="chart-body chart-tall">
           <canvas id="timelineChart"></canvas>
@@ -156,6 +217,129 @@
         </div>
       </div>
 
+    </div><!-- /charts-grid -->
+
+    <!-- ── SECOND ANALYTICS ROW ── -->
+    <div class="charts-grid">
+
+      <!-- Session Duration Distribution -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">⏱ Session Duration</span>
+          <span class="chart-sub">How long each test session ran</span>
+        </div>
+        <div class="chart-body">
+          <canvas id="sessionDurationChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Publisher Injection Distribution -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">🕵️ Top Injected Publishers</span>
+          <span class="chart-sub">Publisher IDs injected most frequently</span>
+        </div>
+        <div class="chart-body">
+          <canvas id="publisherChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Coupon Site Source Donut -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">🎟️ Coupon Site Sources</span>
+          <span class="chart-sub">Which coupon sites trigger injections</span>
+        </div>
+        <div class="chart-body">
+          <canvas id="couponSiteChart"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── PUBLISHER INTELLIGENCE TABLE ── -->
+    <div class="table-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+          <h3>🕵️ Publisher Intelligence</h3>
+          <p class="hint-text">
+            Injected publisher IDs grouped from <code class="inline-code">redirectionURL2FLP</code> — ground truth from the API, no regex guessing.
+            &nbsp;<span class="kpi-inline">Unique pub IDs: <b id="pubIntelCount">—</b></span>
+            &nbsp;<span class="kpi-inline warn">⚠️ Multi-ext: <b id="pubIntelMultiExt">—</b></span>
+            &nbsp;<span class="hint-text" style="display:inline;">Click a row to filter records to that publisher.</span>
+          </p>
+        </div>
+      </div>
+      <div class="table-wrapper" style="max-height:340px;">
+        <table id="publisherIntelTable">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Publisher ID</th>
+              <th>Extensions Using</th>
+              <th>Brands Hit</th>
+              <th>Injections</th>
+              <th>Via Coupon Sites</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── ADVERTISER ANALYSIS TABLE ── -->
+    <div class="table-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+          <h3>🏪 Advertiser (Merchant) Attack Surface</h3>
+          <p class="hint-text">
+            Which advertiser/merchant IDs (<code class="inline-code">advValue</code>) are being targeted across brands and networks.
+            &nbsp;<span class="kpi-inline">Unique advertisers: <b id="advertiserCount">—</b></span>
+          </p>
+        </div>
+      </div>
+      <div class="table-wrapper" style="max-height:300px;">
+        <table id="advertiserTable">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Advertiser ID</th>
+              <th>Brands Targeted</th>
+              <th>Network</th>
+              <th>Findings</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── COUPON SITE ATTACK SURFACE ── -->
+    <div class="table-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+          <h3>🎟️ Coupon Site Attack Surface</h3>
+          <p class="hint-text">
+            Which coupon/cashback sites are being used as the entry point for affiliate injection attacks.
+            &nbsp;<span class="kpi-inline">Unique sites: <b id="couponSiteCount">—</b></span>
+            &nbsp;<span class="hint-text" style="display:inline;">Click a row to filter records to that site.</span>
+          </p>
+        </div>
+      </div>
+      <div class="table-wrapper" style="max-height:300px;">
+        <table id="couponSiteTable">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Coupon Site</th>
+              <th>Extensions</th>
+              <th>Brands Targeted</th>
+              <th>Findings</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- ── EXTENSION RISK TABLE ── -->
@@ -163,7 +347,7 @@
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <div>
           <h3>🚨 Extension Risk Scores</h3>
-          <p class="hint-text">Score = unique brands × avg violation weight × log(findings). Higher = more dangerous.</p>
+          <p class="hint-text">Score = unique brands × avg violation weight × log(findings). Higher = more dangerous. Click a row to filter records.</p>
         </div>
         <button id="downloadRiskExcelBtn" class="excel-btn">⬇️ Export Risk Report</button>
       </div>
@@ -175,6 +359,7 @@
               <th>Extension</th>
               <th>Findings</th>
               <th>Brands Hit</th>
+              <th>Networks</th>
               <th>Risk Score</th>
             </tr>
           </thead>
@@ -188,8 +373,9 @@
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <div>
           <h3>🗺️ Network × Brand Matrix</h3>
-          <p class="hint-text">Which brands are being hijacked on which networks. Darker = more findings. Top 12 brands shown.</p>
+          <p class="hint-text">Which brands are being hijacked on which networks. Darker = more findings. Top 8 networks × Top 12 brands. <b style="color:#64ffda;">Click any cell to filter records to that combination.</b></p>
         </div>
+        <button id="clearMatrixFilterBtn" class="back-btn" style="display:none;">✕ Clear Matrix Filter</button>
       </div>
       <div id="networkBrandMatrix"></div>
     </div>
@@ -200,9 +386,10 @@
         <div>
           <h3>🔄 Affiliate ID Swap Detector</h3>
           <p class="hint-text">
-            Records where the extension replaced the original affiliate ID with its own.
-            Comparing <code class="inline-code">redirectionURL</code> vs <code class="inline-code">redirectionURLFLP</code>.
+            Records where the extension replaced the merchant's publisher ID with its own.
+            Detection uses <code class="inline-code">redirectionURL2</code> vs <code class="inline-code">redirectionURL2FLP</code> — the actual affiliate network click URLs (e.g. LinkShare).
             &nbsp;<span class="kpi-inline">Swaps found: <b id="swapCount">—</b></span>
+            &nbsp;<span class="kpi-inline warn" id="swapPctBadge" style="display:none;">⚡ <b id="swapPctValue">0%</b> of filtered records</span>
           </p>
         </div>
       </div>
@@ -214,7 +401,9 @@
               <th>Extension</th>
               <th>Brand</th>
               <th>Network</th>
-              <th>Affiliate ID: Original → Injected</th>
+              <th>Original Publisher (redirectionURL2)</th>
+              <th>Injected Publisher (redirectionURL2FLP)</th>
+              <th>Duration</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -239,10 +428,11 @@
           <thead>
             <tr>
               <th>Rank</th>
-              <th>Injected Affiliate ID</th>
+              <th>Injected Publisher ID</th>
               <th>Extensions Using</th>
               <th>Brands Hit</th>
-              <th>Total Findings</th>
+              <th>Total Injections</th>
+              <th>Via Coupon Sites</th>
               <th>Networks</th>
             </tr>
           </thead>
@@ -262,14 +452,37 @@
         <table id="dataTable">
           <thead>
             <tr>
-              <th>Incident</th><th>Extension</th><th>Brand</th>
-              <th>Violation</th><th>Network</th><th>Video</th><th>Log</th>
+              <th>Incident / Duration</th><th>Extension</th><th>Brand</th>
+              <th>Violation / Type</th><th>Network</th><th>Publisher</th><th>Evidence</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
     </div>
+
+    <!-- ══ UNIFIED EVIDENCE VIEWER MODAL ══ -->
+    <div id="evidenceModal" class="lightbox" style="display:none;" onclick="closeEvidenceModal(event)">
+      <div class="lightbox-inner evidence-modal-inner">
+
+        <!-- Header -->
+        <div class="ev-header">
+          <div class="ev-meta" id="evMeta"></div>
+          <button class="lightbox-close" onclick="closeEvidenceModal()">✕</button>
+        </div>
+
+        <!-- URL Inspector row -->
+        <div class="ev-urls" id="evUrls"></div>
+
+        <!-- Tab bar -->
+        <div class="ev-tabs" id="evTabBar"></div>
+
+        <!-- Tab panels -->
+        <div class="ev-panels" id="evPanels"></div>
+
+      </div>
+    </div>
+
   </div><!-- /view-reports -->
 
   <!-- ══════════════════════════════════════════════════════════
@@ -371,14 +584,30 @@
         <div>
           <h3>Brand Detail</h3>
           <p id="brandDetailInfo" style="color:#b0b0b0;font-size:13px;margin-top:4px;"></p>
+          <p id="brandEscalationBanner" style="display:none;margin-top:8px;"></p>
         </div>
         <button class="back-btn" onclick="closeBrandDetails()">← Back to All Brands</button>
       </div>
-      <!-- Mini network chart -->
-      <div class="chart-card chart-inline" style="margin-bottom:20px;">
-        <div class="chart-body" style="height:200px;">
-          <canvas id="brandNetworkChart"></canvas>
+      <!-- Mini charts row -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+        <div class="chart-card chart-inline">
+          <div class="chart-header"><span class="chart-title" style="font-size:13px;">Networks</span></div>
+          <div class="chart-body" style="height:200px;"><canvas id="brandNetworkChart"></canvas></div>
         </div>
+        <div class="chart-card chart-inline">
+          <div class="chart-header"><span class="chart-title" style="font-size:13px;">Violation Types</span></div>
+          <div class="chart-body" style="height:200px;"><canvas id="brandViolationChart"></canvas></div>
+        </div>
+      </div>
+      <!-- Extension history mini chart -->
+      <div class="chart-card chart-inline" style="margin-bottom:20px;">
+        <div class="chart-header"><span class="chart-title" style="font-size:13px;">📅 Findings Over Time (this brand)</span></div>
+        <div class="chart-body" style="height:160px;"><canvas id="brandTimelineChart"></canvas></div>
+      </div>
+      <!-- Screenshot gallery -->
+      <div id="brandScreenshotGallery" style="margin-bottom:20px;display:none;">
+        <h4 style="color:#64ffda;margin-bottom:12px;font-size:14px;">📸 Captured Screenshots</h4>
+        <div id="brandScreenshotGrid" class="screenshot-grid"></div>
       </div>
       <!-- Detail table -->
       <div class="table-wrapper">
@@ -386,7 +615,7 @@
           <thead>
             <tr>
               <th>Incident</th><th>Extension</th><th>Violation</th>
-              <th>Network</th><th>Video</th><th>Log</th>
+              <th>Network</th><th>Evidence</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -403,16 +632,24 @@
     <div class="server-status-section">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h3 style="color:#64ffda;font-size:18px;margin:0;">Server Status</h3>
-        <span id="serverStatusTimestamp" style="color:#666;font-size:13px;">—</span>
+        <div style="display:flex;align-items:center;gap:16px;">
+          <span id="serverStatusTimestamp" style="color:#666;font-size:13px;">—</span>
+          <button onclick="fetchServerStatus()" class="back-btn" style="font-size:12px;padding:6px 14px;">🔄 Refresh</button>
+        </div>
       </div>
-      <!-- Utilization bar -->
+      <!-- Enhanced utilization bar -->
       <div id="serverUtilSummary" style="margin-bottom:20px;"></div>
+      <!-- Session history indicator -->
+      <div id="serverUtilHistory" style="margin-bottom:20px;display:none;">
+        <div style="color:#666;font-size:12px;margin-bottom:6px;">Utilization trend (this session, last 10 readings):</div>
+        <div id="utilSparkline" class="util-sparkline"></div>
+      </div>
       <div class="server-status-block">
-        <h3>🔴 Busy Servers</h3>
+        <h3>🔴 Busy Servers <span id="busyCount" style="font-size:14px;color:#ff6b6b;font-weight:normal;margin-left:8px;"></span></h3>
         <div id="busyServerStatus" class="server-status-list">Loading...</div>
       </div>
       <div class="server-status-block">
-        <h3>🟢 Free Servers</h3>
+        <h3>🟢 Free Servers <span id="freeCount" style="font-size:14px;color:#43e97b;font-weight:normal;margin-left:8px;"></span></h3>
         <div id="freeServerStatus" class="server-status-list">Loading...</div>
       </div>
       <p style="color:#666;font-size:12px;margin-top:16px;">Auto-refreshes every 60 seconds.</p>
@@ -424,14 +661,36 @@
   ══════════════════════════════════════════════════════════ -->
   <div id="view-vm-adware" class="view-content" style="display:none;">
 
-    <!-- VM Adware Chart -->
-    <div class="chart-card chart-full" style="margin-bottom:24px;">
-      <div class="chart-header">
-        <span class="chart-title">🛡️ Adware Count per VM</span>
-        <span class="chart-sub">Which VMs have the most exposed extensions</span>
+    <!-- VM Adware Charts Row -->
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px;margin-bottom:24px;">
+      <div class="chart-card chart-full">
+        <div class="chart-header">
+          <span class="chart-title">🛡️ Adware Count per VM</span>
+          <span class="chart-sub">Which VMs have the most exposed extensions</span>
+        </div>
+        <div class="chart-body chart-tall">
+          <canvas id="vmAdwareChart"></canvas>
+        </div>
       </div>
-      <div class="chart-body chart-tall">
-        <canvas id="vmAdwareChart"></canvas>
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">🌐 Browser Breakdown</span>
+          <span class="chart-sub">By adware count</span>
+        </div>
+        <div class="chart-body chart-tall">
+          <canvas id="vmBrowserChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- VM Adware Timeline -->
+    <div class="chart-card" style="margin-bottom:24px;">
+      <div class="chart-header">
+        <span class="chart-title">📈 Adware Installations Over Time</span>
+        <span class="chart-sub">When were adware extensions first recorded</span>
+      </div>
+      <div class="chart-body" style="height:200px;">
+        <canvas id="vmAdwareTimelineChart"></canvas>
       </div>
     </div>
 

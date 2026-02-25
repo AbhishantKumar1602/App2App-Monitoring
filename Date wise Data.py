@@ -84,7 +84,16 @@ def main():
                     "finalLandingUrl": r.get("finalLandingUrl"),
                     "redirectionURL": r.get("redirectionURL"),
                     "redirectionURLFLP": r.get("redirectionURLFLP"),
-                    "networks": r.get("networks")
+                    "networks": r.get("networks"),
+                    "automationEnd": r.get("automationEnd"),
+                    "couponSite": r.get("couponSite"),
+                    "redirectionURL2": r.get("redirectionURL2"),
+                    "redirectionURL2FLP": r.get("redirectionURL2FLP"),
+                    "pubName": r.get("pubName"),
+                    "pubValue": r.get("pubValue"),
+                    "advName": r.get("advName"),
+                    "advValue": r.get("advValue"),
+                    "vm": r.get("vm")
                 })
 
     # ---------- Sheet 1 ----------
