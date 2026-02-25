@@ -213,6 +213,9 @@ function updateDashboard(data) {
   document.getElementById("uniqueExtensions").innerText = new Set(
     data.map((d) => d.extensionId),
   ).size;
+  document.getElementById("uniqueBrands").innerText = new Set(
+    data.map((d) => (d.keyword || "Unknown").toLowerCase()),
+  ).size;
   document.getElementById("latestDate").innerText = data.length
     ? data[0].automationStart.split("T")[0]
     : "-";
@@ -390,13 +393,17 @@ function updateBrandSummaryTable(data) {
   document.getElementById("brandTableSubtitle").innerText =
     `Showing ${data.length} brands`;
 
+  const brandFilter = document.getElementById("brandFilter");
+
   data.forEach((item) => {
     const tr = document.createElement("tr");
     tr.style.cursor = "pointer";
-    tr.onclick = () => {
-      document.getElementById("brandFilter").value = item.brand;
-      onBrandSelected();
-    };
+    if (brandFilter) {
+      tr.onclick = () => {
+        document.getElementById("brandFilter").value = item.brand;
+        onBrandSelected();
+      };
+    }
     tr.innerHTML = `
       <td><b>${item.brand}</b></td>
       <td><span class="badge">${item.totalFindings}</span></td>
