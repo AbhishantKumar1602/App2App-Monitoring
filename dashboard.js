@@ -21,6 +21,8 @@ const charts = {
   extensionRisk: null,
   networkDist: null,
   brandNetwork: null,
+  typeChart: null,
+  networkBrand: null,
 };
 
 // ============================================================
@@ -166,10 +168,19 @@ function loadMainData() {
           incidenceId: r.incidenceId || "",
           videoFilePath: r.videoFilePath || "",
           networkLogFilePath: r.networkLogFilePath || "",
+          type: r.type || "",
+          landingUrl: r.landingUrl || "",
+          finalLandingUrl: r.finalLandingUrl || "",
+          redirectionURL: r.redirectionURL || "",
+          redirectionURLFLP: r.redirectionURLFLP || "",
+          brandUrl: r.brandUrl || "",
+          screenShotPath: r.screenShotPath || "",
+          landingScreenshot: r.landingScreenshot || "",
         }));
       state.raw.sort((a, b) => (parseDate(b.automationStart) || 0) - (parseDate(a.automationStart) || 0));
       fillSelect("extensionFilter", state.raw.map(d => d.extensionName), "All Extensions");
       fillSelect("networkFilter", state.raw.flatMap(d => d.networks ? d.networks.split(",").map(n => n.trim()) : []), "All Networks");
+      fillSelect("typeFilter", state.raw.map(d => d.type).filter(Boolean), "All Types");
       initializeDatePickers();
       applyFilters();
       initializeBrandData(state.raw);
@@ -201,6 +212,7 @@ function applyFilters() {
   const ext = document.getElementById("extensionFilter")?.value || "";
   const extIdName = (document.getElementById("extensionIdNameBox")?.value || "").trim().toLowerCase();
   const network = document.getElementById("networkFilter")?.value || "";
+  const typeVal = document.getElementById("typeFilter")?.value || "";
   const from = document.getElementById("fromDate")?.value || "";
   const to = document.getElementById("toDate")?.value || "";
   const search = (document.getElementById("searchBox")?.value || "").toLowerCase();
@@ -208,7 +220,8 @@ function applyFilters() {
   let filtered = state.raw;
   if (ext) filtered = filtered.filter(d => d.extensionName === ext || d.extensionId === ext);
   if (extIdName) filtered = filtered.filter(d => d.extensionName.toLowerCase().includes(extIdName) || d.extensionId.toLowerCase().includes(extIdName));
-  if (network) filtered = filtered.filter(d => d.networks.toLowerCase().includes(network.toLowerCase()));
+  if (network) filtered = filtered.filter(d => d.networks.split(",").map(n => n.trim()).includes(network));
+  if (typeVal) filtered = filtered.filter(d => d.type === typeVal);
   if (from) filtered = filtered.filter(d => d.automationStart >= from);
   if (to) filtered = filtered.filter(d => d.automationStart <= to + "T23:59:59");
   if (search) filtered = filtered.filter(d =>
@@ -216,7 +229,8 @@ function applyFilters() {
     d.voilationTypeFLP.toLowerCase().includes(search) ||
     d.networks.toLowerCase().includes(search) ||
     d.incidenceId.toString().includes(search) ||
-    d.extensionName.toLowerCase().includes(search)
+    d.extensionName.toLowerCase().includes(search) ||
+    d.type.toLowerCase().includes(search)
   );
 
   state.filtered = filtered;
@@ -304,7 +318,11 @@ function renderAnalyticsCharts(data) {
   renderTimelineChart(data);
   renderViolationDonut(data);
   renderNetworkDistChart(data);
+  renderTypeChart(data);
   renderExtensionRiskTable(data);
+  renderNetworkBrandMatrix(data);
+  renderAffiliateSwapTable(data);
+  renderAffiliateFingerprintTable(data);
 }
 
 // 1. Findings Over Time
@@ -390,6 +408,241 @@ function renderNetworkDistChart(data) {
     },
     options: opts,
   });
+}
+
+// ── NEW: BEP vs OLM Type Chart ────────────────────────────
+function renderTypeChart(data) {
+  destroyChart("typeChart");
+  const ctx = document.getElementById("typeChart");
+  if (!ctx) return;
+  const counts = {};
+  data.forEach(r => {
+    const t = r.type || "Unknown";
+    counts[t] = (counts[t] || 0) + 1;
+  });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  if (sorted.length === 0) return;
+
+  // Colour map — BEP gets orange, OLM gets teal, unknown gets grey
+  const colorMap = { BEP: "#ff9966", OLM: "#64ffda" };
+  const bgColors = sorted.map(([k]) => colorMap[k] || "#667eea");
+
+  charts.typeChart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: sorted.map(([k]) => k),
+      datasets: [{ data: sorted.map(([, v]) => v), backgroundColor: bgColors, borderColor: "#0f0f23", borderWidth: 2, hoverOffset: 8 }],
+    },
+    options: {
+      ...baseOpts(true),
+      cutout: "60%",
+      plugins: {
+        legend: { position: "right", labels: { color: "#e0e0e0", padding: 14, boxWidth: 14, font: { size: 13 } } },
+        tooltip: { backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0", borderColor: "#2a2a40", borderWidth: 1,
+          callbacks: {
+            label: ctx => {
+              const total = ctx.dataset.data.reduce((s, v) => s + v, 0);
+              const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : 0;
+              return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+            }
+          }
+        },
+      },
+    },
+  });
+}
+
+// ── NEW: Network × Brand Matrix ───────────────────────────
+function renderNetworkBrandMatrix(data) {
+  const wrapper = document.getElementById("networkBrandMatrix");
+  if (!wrapper) return;
+
+  // Collect all networks and top brands
+  const networkSet = new Set();
+  const brandCounts = {};
+  data.forEach(r => {
+    r.networks.split(",").forEach(n => { const net = n.trim(); if (net) networkSet.add(net); });
+    brandCounts[r.keyword] = (brandCounts[r.keyword] || 0) + 1;
+  });
+
+  const networks = [...networkSet].sort();
+  const topBrands = Object.entries(brandCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([b]) => b);
+
+  if (networks.length === 0 || topBrands.length === 0) {
+    wrapper.innerHTML = '<p style="color:#666;padding:16px;">No data available.</p>';
+    return;
+  }
+
+  // Build matrix: matrix[brand][network] = count
+  const matrix = {};
+  topBrands.forEach(b => { matrix[b] = {}; networks.forEach(n => { matrix[b][n] = 0; }); });
+  data.forEach(r => {
+    if (!matrix[r.keyword]) return;
+    r.networks.split(",").forEach(n => {
+      const net = n.trim();
+      if (net && matrix[r.keyword][net] !== undefined) matrix[r.keyword][net]++;
+    });
+  });
+
+  // Find max for colour scale
+  let maxVal = 0;
+  topBrands.forEach(b => networks.forEach(n => { if (matrix[b][n] > maxVal) maxVal = matrix[b][n]; }));
+
+  const cellColor = (v) => {
+    if (v === 0) return "#0f0f23";
+    const intensity = Math.min(v / (maxVal || 1), 1);
+    const r = Math.round(102 + (255 - 102) * intensity);
+    const g = Math.round(126 + (75 - 126) * intensity);
+    const b = Math.round(234 + (92 - 234) * intensity);
+    return `rgb(${r},${g},${b})`;
+  };
+  const textColor = (v) => v === 0 ? "#333" : v / (maxVal || 1) > 0.5 ? "#fff" : "#e0e0e0";
+
+  let html = '<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th class="matrix-corner">Brand \ Network</th>';
+  networks.forEach(n => { html += `<th class="matrix-net">${esc(n)}</th>`; });
+  html += '</tr></thead><tbody>';
+  topBrands.forEach(b => {
+    const rowTotal = networks.reduce((s, n) => s + matrix[b][n], 0);
+    html += `<tr><td class="matrix-brand">${esc(b)}</td>`;
+    networks.forEach(n => {
+      const v = matrix[b][n];
+      html += `<td class="matrix-cell" style="background:${cellColor(v)};color:${textColor(v)};" title="${esc(b)} × ${esc(n)}: ${v}">${v > 0 ? v : ""}</td>`;
+    });
+    html += `<td class="matrix-total">${rowTotal}</td></tr>`;
+  });
+  html += '</tbody></table></div>';
+  wrapper.innerHTML = html;
+}
+
+// ── NEW: Affiliate ID Swap Detector ───────────────────────
+function extractAffiliateId(url) {
+  if (!url) return null;
+  // Try ranSiteID (Rakuten/CJ pattern)
+  const ranMatch = url.match(/ranSiteID=([^&]+)/i) || url.match(/ransiteid=([^&]+)/i);
+  if (ranMatch) return ranMatch[1];
+  // Try generic affiliate ID params
+  const patterns = [/[?&]affiliateid=([^&]+)/i, /[?&]aff_id=([^&]+)/i, /[?&]affiliate_id=([^&]+)/i, /[?&]pid=([^&]+)/i, /[?&]subid=([^&]+)/i, /[?&]clickref=([^&]+)/i];
+  for (const p of patterns) { const m = url.match(p); if (m) return m[1]; }
+  return null;
+}
+
+function extractAffiliateParam(url, param) {
+  if (!url) return null;
+
+  try {
+    const urlObj = new URL(url);
+    return urlObj.searchParams.get(param);
+  } catch (e) {
+    console.warn("Invalid URL:", url);
+    return null;
+  }
+}
+
+function renderAffiliateSwapTable(data) {
+  const tbody = document.querySelector("#affiliateSwapTable tbody");
+  if (!tbody) return;
+
+  // Only rows where redirectionURL and redirectionURLFLP both exist and differ
+  const swaps = data.filter(r => r.redirectionURL && r.redirectionURLFLP && r.redirectionURL !== r.redirectionURLFLP);
+
+  if (swaps.length === 0) {
+    setTableMessage("#affiliateSwapTable tbody", "No affiliate swap evidence found in current filter.", 5);
+    return;
+  }
+
+  tbody.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  swaps.forEach(r => {
+    const origId = extractAffiliateId(r.redirectionURL) || extractAffiliateParam(r.redirectionURL, "utm_content") || "—";
+    const injId  = extractAffiliateId(r.redirectionURLFLP) || extractAffiliateParam(r.redirectionURLFLP, "utm_content") || "—";
+    const sameId = origId === injId;
+    const tr = document.createElement("tr");
+
+    const incTd = document.createElement("td");
+    incTd.innerHTML = `<b>${esc(r.incidenceId || "-")}</b><div style="font-size:11px;color:#666;">${esc(fmtDate(r.automationStart))}</div>`;
+    const extTd = document.createElement("td");
+    extTd.innerHTML = `${esc(r.extensionName)}<br><span style="font-size:11px;color:#555;">${esc(r.extensionId)}</span>`;
+    const brandTd = document.createElement("td"); brandTd.textContent = r.keyword;
+    const netTd = document.createElement("td"); netTd.textContent = r.networks;
+    const swapTd = document.createElement("td");
+
+    if (sameId) {
+      swapTd.innerHTML = `<span style="color:#666;font-size:12px;">Same ID — URL params differ</span>`;
+    } else {
+      swapTd.innerHTML = `
+        <div class="swap-row">
+          <span class="swap-orig" title="Original: ${esc(r.redirectionURL)}">
+            <span class="swap-label">Original</span>
+            <code class="swap-id">${esc(origId)}</code>
+          </span>
+          <span class="swap-arrow">→</span>
+          <span class="swap-inj" title="Injected: ${esc(r.redirectionURLFLP)}">
+            <span class="swap-label">Injected</span>
+            <code class="swap-id injected">${esc(injId)}</code>
+          </span>
+        </div>`;
+    }
+    tr.append(incTd, extTd, brandTd, netTd, swapTd);
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+
+  // Update count badge
+  const badge = document.getElementById("swapCount");
+  if (badge) badge.textContent = swaps.length;
+}
+
+// ── NEW: Affiliate Fingerprint (injected ID clusters) ─────
+function renderAffiliateFingerprintTable(data) {
+  const tbody = document.querySelector("#affiliateFingerprintTable tbody");
+  if (!tbody) return;
+
+  // Group by injected affiliate ID across records
+  const fingerprintMap = {};
+  data.forEach(r => {
+    if (!r.redirectionURLFLP) return;
+    const injId = extractAffiliateId(r.redirectionURLFLP) || extractAffiliateParam(r.redirectionURLFLP, "utm_content");
+    if (!injId || injId === "—") return;
+    if (!fingerprintMap[injId]) fingerprintMap[injId] = { id: injId, extensions: new Set(), brands: new Set(), networks: new Set(), count: 0 };
+    fingerprintMap[injId].extensions.add(r.extensionId);
+    fingerprintMap[injId].brands.add(r.keyword);
+    fingerprintMap[injId].networks.add(r.networks);
+    fingerprintMap[injId].count++;
+  });
+
+  const sorted = Object.values(fingerprintMap).sort((a, b) => b.extensions.size - a.extensions.size || b.count - a.count);
+
+  if (sorted.length === 0) {
+    setTableMessage("#affiliateFingerprintTable tbody", "No affiliate fingerprint data in current filter.", 5);
+    return;
+  }
+
+  tbody.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  sorted.forEach((fp, idx) => {
+    const tr = document.createElement("tr");
+    const isSuspect = fp.extensions.size > 1; // same affiliate ID used by multiple extensions = coordinated fraud signal
+
+    const rankTd = document.createElement("td"); rankTd.innerHTML = `<span class="rank-num">#${idx + 1}</span>`;
+    const idTd = document.createElement("td");
+    idTd.innerHTML = `<code class="aff-id-code ${isSuspect ? "aff-suspect" : ""}">${esc(fp.id)}</code>${isSuspect ? ' <span class="fraud-badge">⚠️ Multi-ext</span>' : ''}`;
+    const extTd = document.createElement("td"); extTd.textContent = fp.extensions.size;
+    const brandTd = document.createElement("td"); brandTd.textContent = fp.brands.size;
+    const countTd = document.createElement("td"); countTd.textContent = fp.count;
+    const netTd = document.createElement("td");
+    netTd.innerHTML = [...fp.networks].map(n => `<span class="net-tag">${esc(n)}</span>`).join(" ");
+    tr.append(rankTd, idTd, extTd, brandTd, countTd, netTd);
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+
+  const badge = document.getElementById("fingerprintCount");
+  if (badge) badge.textContent = sorted.length;
+  const suspectBadge = document.getElementById("suspectCount");
+  if (suspectBadge) suspectBadge.textContent = sorted.filter(f => f.extensions.size > 1).length;
 }
 
 // 4. Extension Risk Score
@@ -839,6 +1092,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   document.getElementById("extensionFilter")?.addEventListener("change", applyFilters);
   document.getElementById("networkFilter")?.addEventListener("change", applyFilters);
+  document.getElementById("typeFilter")?.addEventListener("change", applyFilters);
   document.getElementById("searchBox")?.addEventListener("input", applyFilters);
   document.getElementById("extensionIdNameBox")?.addEventListener("input", applyFilters);
   document.getElementById("brandSearchBox")?.addEventListener("input", applyBrandFilters);
