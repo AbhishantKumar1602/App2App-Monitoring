@@ -9,293 +9,387 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
 </head>
 <body>
-  <!-- Main Content -->
-  <div class="main-content">
-    <!-- Header -->
-    <div class="header">
-      <h1>Monitoring Dashboard</h1>
-      <div class="user-info">
-        <span>Welcome back!</span>
+<div class="main-content">
+
+  <!-- ══════════════════════════════════════════════
+       HEADER
+  ══════════════════════════════════════════════ -->
+  <div class="header">
+    <h1>Monitoring Dashboard</h1>
+    <div class="user-info"><span>Welcome back!</span></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       KPI CARDS
+  ══════════════════════════════════════════════ -->
+  <div class="cards">
+    <div class="card card-purple">
+      <div class="card-icon">📋</div>
+      <div class="card-content">
+        <div class="card-value" id="totalRecords">0</div>
+        <div class="card-label">Total Records</div>
       </div>
     </div>
-
-    <!-- KPI Cards -->
-    <div class="cards">
-      <div class="card card-purple">
-        <div class="card-icon">📋</div>
-        <div class="card-content">
-          <div class="card-value" id="totalRecords">0</div>
-          <div class="card-label">Total Records</div>
-        </div>
-      </div>
-      <div class="card card-blue">
-        <div class="card-icon">🔌</div>
-        <div class="card-content">
-          <div class="card-value" id="uniqueExtensions">0</div>
-          <div class="card-label">Extensions</div>
-        </div>
-      </div>
-      <div class="card card-orange">
-        <div class="card-icon">🏢</div>
-        <div class="card-content">
-          <div class="card-value" id="uniqueBrands">0</div>
-          <div class="card-label">Unique Brands</div>
-        </div>
-      </div>
-      <div class="card card-green">
-        <div class="card-icon">📅</div>
-        <div class="card-content">
-          <div class="card-value" id="latestDate">-</div>
-          <div class="card-label">Latest Date</div>
-        </div>
+    <div class="card card-blue">
+      <div class="card-icon">🔌</div>
+      <div class="card-content">
+        <div class="card-value" id="uniqueExtensions">0</div>
+        <div class="card-label">Extensions</div>
       </div>
     </div>
-
-    <!-- Navigation Boxes -->
-    <div class="nav-tabs">
-      <div class="nav-tab active" onclick="switchTab('reports', this)">Reports</div>
-      <div class="nav-tab" onclick="switchTab('brands', this)">Brands</div>
-      <div class="nav-tab" onclick="switchTab('server-status', this)">Server Status</div>
-      <div class="nav-tab" onclick="switchTab('vm-adware', this)">VM Wise Adware</div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════
-         REPORTS VIEW (Default)
-    ═══════════════════════════════════════════════════ -->
-    <div id="view-reports" class="view-content">
-      <div class="filters-section">
-        <h3>Filters</h3>
-        <div class="filters">
-          <div class="filter-group">
-            <label>Extension</label>
-            <select id="extensionFilter">
-              <option value="">All Extensions</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>Extension ID / Name</label>
-            <input type="text" id="extensionIdNameBox" placeholder="Paste or type ID or Name">
-          </div>
-          <div class="filter-group">
-            <label>Network</label>
-            <select id="networkFilter">
-              <option value="">All Networks</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>From Date</label>
-            <div class="input-with-clear">
-              <input type="text" id="fromDate" placeholder="Select date" readonly>
-              <span class="clear-icon" id="clearFromDate" title="Clear date">&#10006;</span>
-            </div>
-          </div>
-          <div class="filter-group">
-            <label>To Date</label>
-            <div class="input-with-clear">
-              <input type="text" id="toDate" placeholder="Select date" readonly>
-              <span class="clear-icon" id="clearToDate" title="Clear date">&#10006;</span>
-            </div>
-          </div>
-          <div class="filter-group">
-            <label>Search</label>
-            <input type="text" id="searchBox" placeholder="Brand, IncidentId, Network, Extension...">
-          </div>
-        </div>
+    <div class="card card-orange">
+      <div class="card-icon">🏢</div>
+      <div class="card-content">
+        <div class="card-value" id="uniqueBrands">0</div>
+        <div class="card-label">Unique Brands</div>
       </div>
+    </div>
+    <div class="card card-green">
+      <div class="card-icon">📅</div>
+      <div class="card-content">
+        <div class="card-value" id="latestDate">-</div>
+        <div class="card-label">Latest Date</div>
+      </div>
+    </div>
+  </div>
 
-      <div class="table-section">
-        <h3>Records</h3>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <div id="reportsPagination" class="pagination-bar"></div>
-          <button id="downloadExcelBtn" class="excel-btn">⬇️ Download Excel</button>
+  <!-- ══════════════════════════════════════════════
+       NAV TABS
+  ══════════════════════════════════════════════ -->
+  <div class="nav-tabs">
+    <div class="nav-tab active" onclick="switchTab('reports', this)">📊 Reports</div>
+    <div class="nav-tab" onclick="switchTab('brands', this)">🏢 Brands</div>
+    <div class="nav-tab" onclick="switchTab('server-status', this)">🖥️ Server Status</div>
+    <div class="nav-tab" onclick="switchTab('vm-adware', this)">🛡️ VM Adware</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       REPORTS VIEW
+  ══════════════════════════════════════════════════════════ -->
+  <div id="view-reports" class="view-content">
+
+    <!-- Filters -->
+    <div class="filters-section">
+      <h3>Filters</h3>
+      <div class="filters">
+        <div class="filter-group">
+          <label>Extension</label>
+          <select id="extensionFilter"><option value="">All Extensions</option></select>
         </div>
-        <div class="table-wrapper">
-          <table id="dataTable">
-            <thead>
-              <tr>
-                <th>Incident</th>
-                <th>Extension</th>
-                <th>Brand</th>
-                <th>Violation</th>
-                <th>Network</th>
-                <th>Video</th>
-                <th>Log</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <div class="filter-group">
+          <label>Extension ID / Name</label>
+          <input type="text" id="extensionIdNameBox" placeholder="Paste or type ID or Name">
+        </div>
+        <div class="filter-group">
+          <label>Network</label>
+          <select id="networkFilter"><option value="">All Networks</option></select>
+        </div>
+        <div class="filter-group">
+          <label>From Date</label>
+          <div class="input-with-clear">
+            <input type="text" id="fromDate" placeholder="Select date" readonly>
+            <span class="clear-icon" id="clearFromDate" title="Clear">&#10006;</span>
+          </div>
+        </div>
+        <div class="filter-group">
+          <label>To Date</label>
+          <div class="input-with-clear">
+            <input type="text" id="toDate" placeholder="Select date" readonly>
+            <span class="clear-icon" id="clearToDate" title="Clear">&#10006;</span>
+          </div>
+        </div>
+        <div class="filter-group">
+          <label>Search</label>
+          <input type="text" id="searchBox" placeholder="Brand, Incident, Network, Extension...">
         </div>
       </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════
-         BRANDS VIEW
-    ═══════════════════════════════════════════════════ -->
-    <div id="view-brands" class="view-content" style="display:none;">
+    <!-- ── ANALYTICS CHARTS ROW ── -->
+    <div class="charts-grid">
 
-      <!-- Brand Summary KPI Cards -->
-      <div class="brand-summary-section">
-        <h3>Brand Findings Summary</h3>
-        <div class="brand-stats">
-          <div class="stat-card">
-            <div class="stat-value" id="totalBrands">0</div>
-            <div class="stat-label">Total Brands</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value" id="totalBrandFindings">0</div>
-            <div class="stat-label">Total Findings</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value" id="avgFindingsPerBrand">0</div>
-            <div class="stat-label">Avg per Brand</div>
-          </div>
+      <!-- Timeline -->
+      <div class="chart-card chart-wide">
+        <div class="chart-header">
+          <span class="chart-title">📈 Findings Over Time</span>
+          <span class="chart-sub">Daily incident count</span>
+        </div>
+        <div class="chart-body chart-tall">
+          <canvas id="timelineChart"></canvas>
         </div>
       </div>
 
-      <!-- Brand Filters -->
-      <div class="filters-section">
-        <h3>Filters</h3>
-        <div class="filters">
-          <div class="filter-group">
-            <label>Search Brand</label>
-            <input type="text" id="brandSearchBox" placeholder="Search brand name...">
-          </div>
-          <div class="filter-group">
-            <label>From Date</label>
-            <div class="input-with-clear">
-              <input type="text" id="brandFromDate" placeholder="Select date" readonly>
-              <span class="clear-icon" id="clearBrandFromDate" title="Clear date">&#10006;</span>
-            </div>
-          </div>
-          <div class="filter-group">
-            <label>To Date</label>
-            <div class="input-with-clear">
-              <input type="text" id="brandToDate" placeholder="Select date" readonly>
-              <span class="clear-icon" id="clearBrandToDate" title="Clear date">&#10006;</span>
-            </div>
-          </div>
+      <!-- Violation Donut -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">🥧 Violation Types</span>
+          <span class="chart-sub">Distribution breakdown</span>
+        </div>
+        <div class="chart-body">
+          <canvas id="violationsChart"></canvas>
         </div>
       </div>
 
-      <!-- Brand Summary Table -->
-      <div class="table-section">
-        <h3 id="brandTableTitle">All Brands Overview</h3>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <span id="brandTableSubtitle" style="color:#b0b0b0;font-size:13px;"></span>
-          <button id="downloadBrandExcelBtn" class="excel-btn">⬇️ Download Excel</button>
+      <!-- Network Distribution -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">🌐 Top Networks</span>
+          <span class="chart-sub">By finding count</span>
         </div>
-        <div class="table-wrapper">
-          <table id="brandTable">
-            <thead>
-              <tr id="brandTableHeader">
-                <th>Brand</th>
-                <th>Total Findings</th>
-                <th>Unique Extensions</th>
-                <th>Latest Finding</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <div class="chart-body">
+          <canvas id="networkDistChart"></canvas>
         </div>
-        <p class="hint-text">💡 Click a brand row to see its individual findings.</p>
       </div>
 
-      <!-- Brand Detail Section (shown on row click) -->
-      <div id="brandDetailsSection" class="table-section" style="display:none;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-          <div>
-            <h3>Brand Details</h3>
-            <p id="brandDetailInfo" style="color:#b0b0b0;font-size:13px;margin-top:4px;"></p>
-          </div>
-          <button class="back-btn" onclick="closeBrandDetails()">← Back to All Brands</button>
+    </div>
+
+    <!-- ── EXTENSION RISK TABLE ── -->
+    <div class="table-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+          <h3>🚨 Extension Risk Scores</h3>
+          <p class="hint-text">Score = unique brands × avg violation weight × log(findings). Higher = more dangerous.</p>
         </div>
-        <div class="table-wrapper">
-          <table id="brandDetailsTable">
-            <thead>
-              <tr>
-                <th>Incident</th>
-                <th>Extension</th>
-                <th>Violation</th>
-                <th>Network</th>
-                <th>Video</th>
-                <th>Log</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <button id="downloadRiskExcelBtn" class="excel-btn">⬇️ Export Risk Report</button>
+      </div>
+      <div class="table-wrapper" style="max-height:340px;">
+        <table id="extensionRiskTable">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Extension</th>
+              <th>Findings</th>
+              <th>Brands Hit</th>
+              <th>Risk Score</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Records Table -->
+    <div class="table-section">
+      <h3>Records</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div id="reportsPagination" class="pagination-bar"></div>
+        <button id="downloadExcelBtn" class="excel-btn">⬇️ Download Excel</button>
+      </div>
+      <div class="table-wrapper">
+        <table id="dataTable">
+          <thead>
+            <tr>
+              <th>Incident</th><th>Extension</th><th>Brand</th>
+              <th>Violation</th><th>Network</th><th>Video</th><th>Log</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div><!-- /view-reports -->
+
+  <!-- ══════════════════════════════════════════════════════════
+       BRANDS VIEW
+  ══════════════════════════════════════════════════════════ -->
+  <div id="view-brands" class="view-content" style="display:none;">
+
+    <!-- Brand KPI Cards -->
+    <div class="brand-summary-section">
+      <h3>Brand Findings Summary</h3>
+      <div class="brand-stats">
+        <div class="stat-card">
+          <div class="stat-value" id="totalBrands">0</div>
+          <div class="stat-label">Total Brands</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="totalBrandFindings">0</div>
+          <div class="stat-label">Total Findings</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="avgFindingsPerBrand">0</div>
+          <div class="stat-label">Avg per Brand</div>
+        </div>
+        <div class="stat-card stat-card-warn">
+          <div class="stat-value" id="chronicBrands">0</div>
+          <div class="stat-label">Chronic (2+ wks)</div>
         </div>
       </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════
-         SERVER STATUS VIEW
-    ═══════════════════════════════════════════════════ -->
-    <div id="view-server-status" class="view-content" style="display:none;">
-      <div class="server-status-section">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <h3 style="color:#64ffda;font-size:18px;margin:0;">Server Status</h3>
-          <span id="serverStatusTimestamp" style="color:#666;font-size:13px;">—</span>
-        </div>
-        <div class="server-status-block">
-          <h3>Busy Servers</h3>
-          <div id="busyServerStatus" class="server-status-list">Loading...</div>
-        </div>
-        <div class="server-status-block">
-          <h3>Free Servers</h3>
-          <div id="freeServerStatus" class="server-status-list">Loading...</div>
-        </div>
-        <p style="color:#666;font-size:12px;margin-top:16px;">Auto-refreshes every 60 seconds.</p>
+    <!-- Top Brands Chart -->
+    <div class="chart-card chart-full" id="topBrandsChartSection">
+      <div class="chart-header">
+        <span class="chart-title">🏆 Top 15 Brands by Findings</span>
+        <span class="chart-sub" style="font-size:12px;">
+          <span style="display:inline-block;width:12px;height:12px;background:rgba(255,107,107,0.8);border-radius:2px;margin-right:4px;"></span>Trending up &nbsp;
+          <span style="display:inline-block;width:12px;height:12px;background:rgba(67,233,123,0.8);border-radius:2px;margin-right:4px;"></span>Trending down &nbsp;
+          <span style="display:inline-block;width:12px;height:12px;background:rgba(102,126,234,0.8);border-radius:2px;margin-right:4px;"></span>Stable
+        </span>
+      </div>
+      <div class="chart-body chart-tall">
+        <canvas id="topBrandsChart"></canvas>
       </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════
-         VM WISE ADWARE VIEW
-    ═══════════════════════════════════════════════════ -->
-    <div id="view-vm-adware" class="view-content" style="display:none;">
-      <div class="table-section">
-        <h3>VM Wise Adware</h3>
-        <div class="filters" style="margin-bottom:20px;">
-          <div class="filter-group">
-            <label>Select Server (VM)</label>
-            <select id="vmFilter">
-              <option value="">All VMs</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>Extension Name</label>
-            <select id="vmAdwareExtensionFilter">
-              <option value="">All Extensions</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>Extension ID / Name Search</label>
-            <input type="text" id="vmAdwareSearchBox" placeholder="Paste or type ID or Name">
+    <!-- Brand Filters -->
+    <div class="filters-section">
+      <h3>Filters</h3>
+      <div class="filters">
+        <div class="filter-group">
+          <label>Search Brand</label>
+          <input type="text" id="brandSearchBox" placeholder="Search brand name...">
+        </div>
+        <div class="filter-group">
+          <label>From Date</label>
+          <div class="input-with-clear">
+            <input type="text" id="brandFromDate" placeholder="Select date" readonly>
+            <span class="clear-icon" id="clearBrandFromDate" title="Clear">&#10006;</span>
           </div>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <span></span>
-          <button id="downloadVmAdwareExcelBtn" class="excel-btn">⬇️ Download Excel</button>
-        </div>
-        <div class="table-wrapper">
-          <table id="vmAdwareTable">
-            <thead>
-              <tr>
-                <th>Extension ID</th>
-                <th>Extension Name</th>
-                <th>Browser</th>
-                <th>Created Date</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <div class="filter-group">
+          <label>To Date</label>
+          <div class="input-with-clear">
+            <input type="text" id="brandToDate" placeholder="Select date" readonly>
+            <span class="clear-icon" id="clearBrandToDate" title="Clear">&#10006;</span>
+          </div>
         </div>
       </div>
     </div>
 
-  </div><!-- /.main-content -->
+    <!-- Brand Summary Table -->
+    <div class="table-section">
+      <h3 id="brandTableTitle">All Brands Overview</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span id="brandTableSubtitle" style="color:#b0b0b0;font-size:13px;"></span>
+        <button id="downloadBrandExcelBtn" class="excel-btn">⬇️ Download Excel</button>
+      </div>
+      <div class="table-wrapper">
+        <table id="brandTable">
+          <thead>
+            <tr>
+              <th>Brand</th>
+              <th>Findings</th>
+              <th>Extensions</th>
+              <th>Trend (wk)</th>
+              <th>Date Range</th>
+              <th>Flag</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="hint-text">💡 Click a brand row to drill down into its findings and network breakdown.</p>
+    </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="dashboard.js"></script>
+    <!-- Brand Detail Section -->
+    <div id="brandDetailsSection" class="table-section" style="display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h3>Brand Detail</h3>
+          <p id="brandDetailInfo" style="color:#b0b0b0;font-size:13px;margin-top:4px;"></p>
+        </div>
+        <button class="back-btn" onclick="closeBrandDetails()">← Back to All Brands</button>
+      </div>
+      <!-- Mini network chart -->
+      <div class="chart-card chart-inline" style="margin-bottom:20px;">
+        <div class="chart-body" style="height:200px;">
+          <canvas id="brandNetworkChart"></canvas>
+        </div>
+      </div>
+      <!-- Detail table -->
+      <div class="table-wrapper">
+        <table id="brandDetailsTable">
+          <thead>
+            <tr>
+              <th>Incident</th><th>Extension</th><th>Violation</th>
+              <th>Network</th><th>Video</th><th>Log</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /view-brands -->
+
+  <!-- ══════════════════════════════════════════════════════════
+       SERVER STATUS VIEW
+  ══════════════════════════════════════════════════════════ -->
+  <div id="view-server-status" class="view-content" style="display:none;">
+    <div class="server-status-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="color:#64ffda;font-size:18px;margin:0;">Server Status</h3>
+        <span id="serverStatusTimestamp" style="color:#666;font-size:13px;">—</span>
+      </div>
+      <!-- Utilization bar -->
+      <div id="serverUtilSummary" style="margin-bottom:20px;"></div>
+      <div class="server-status-block">
+        <h3>🔴 Busy Servers</h3>
+        <div id="busyServerStatus" class="server-status-list">Loading...</div>
+      </div>
+      <div class="server-status-block">
+        <h3>🟢 Free Servers</h3>
+        <div id="freeServerStatus" class="server-status-list">Loading...</div>
+      </div>
+      <p style="color:#666;font-size:12px;margin-top:16px;">Auto-refreshes every 60 seconds.</p>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       VM ADWARE VIEW
+  ══════════════════════════════════════════════════════════ -->
+  <div id="view-vm-adware" class="view-content" style="display:none;">
+
+    <!-- VM Adware Chart -->
+    <div class="chart-card chart-full" style="margin-bottom:24px;">
+      <div class="chart-header">
+        <span class="chart-title">🛡️ Adware Count per VM</span>
+        <span class="chart-sub">Which VMs have the most exposed extensions</span>
+      </div>
+      <div class="chart-body chart-tall">
+        <canvas id="vmAdwareChart"></canvas>
+      </div>
+    </div>
+
+    <div class="table-section">
+      <h3>VM Wise Adware</h3>
+      <div class="filters" style="margin-bottom:20px;">
+        <div class="filter-group">
+          <label>Select Server (VM)</label>
+          <select id="vmFilter"><option value="">All VMs</option></select>
+        </div>
+        <div class="filter-group">
+          <label>Extension Name</label>
+          <select id="vmAdwareExtensionFilter"><option value="">All Extensions</option></select>
+        </div>
+        <div class="filter-group">
+          <label>Extension ID / Name Search</label>
+          <input type="text" id="vmAdwareSearchBox" placeholder="Paste or type ID or Name">
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+        <button id="downloadVmAdwareExcelBtn" class="excel-btn">⬇️ Download Excel</button>
+      </div>
+      <div class="table-wrapper">
+        <table id="vmAdwareTable">
+          <thead>
+            <tr>
+              <th>Extension ID</th><th>Extension Name</th><th>Browser</th><th>Created Date</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /view-vm-adware -->
+
+</div><!-- /.main-content -->
+
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="dashboard.js"></script>
 </body>
 </html>

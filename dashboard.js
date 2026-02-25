@@ -1,5 +1,5 @@
 // ============================================================
-// STATE MANAGEMENT - single source of truth
+// STATE MANAGEMENT
 // ============================================================
 const state = {
   raw: [],
@@ -12,126 +12,136 @@ const state = {
   vmRackInfo: {},
 };
 
+// Chart instances — destroyed & rebuilt on data change
+const charts = {
+  timeline: null,
+  topBrands: null,
+  violations: null,
+  vmAdware: null,
+  extensionRisk: null,
+  networkDist: null,
+  brandNetwork: null,
+};
+
 // ============================================================
 // UTILITY HELPERS
 // ============================================================
-
-/** Safe text content — prevents XSS */
 function esc(val) {
   if (val == null) return "-";
   return String(val)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
-/** Parse ISO or "YYYY-MM-DD" date safely */
 function parseDate(str) {
   if (!str) return null;
   const d = new Date(str);
   return isNaN(d.getTime()) ? null : d;
 }
 
-/** Format date string to YYYY-MM-DD for display */
 function fmtDate(str) {
   if (!str) return "-";
   return str.split("T")[0];
 }
 
-/** Normalize brand name: keep display version and compare lowercase */
 function normalizeBrand(val) {
   return (val || "Unknown").trim();
 }
 
-/** Show empty/loading row in a tbody */
 function setTableMessage(tbodySelector, msg, cols) {
   const tbody = document.querySelector(tbodySelector);
   if (!tbody) return;
   tbody.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;color:#666;padding:24px;">${esc(msg)}</td></tr>`;
 }
 
-/** Build <option> elements into a <select>, deduped and sorted */
 function fillSelect(selectId, values, allLabel = "All") {
   const select = document.getElementById(selectId);
   if (!select) return;
   const currentVal = select.value;
   const sorted = [...new Set(values.filter(Boolean))].sort();
   select.innerHTML = `<option value="">${allLabel}</option>`;
-  sorted.forEach((v) => {
+  sorted.forEach(v => {
     const opt = document.createElement("option");
-    opt.value = v;
-    opt.textContent = v;
+    opt.value = v; opt.textContent = v;
     select.appendChild(opt);
   });
-  // restore previous selection if still valid
   if (currentVal && sorted.includes(currentVal)) select.value = currentVal;
 }
 
-// ============================================================
-// LOADING RACK INFO
-// ============================================================
-function loadRackInfo() {
-  return fetch("vm_rack_info.json?t=" + Date.now())
-    .then((res) => res.json())
-    .then((data) => {
-      Object.keys(data).forEach((key) => {
-        state.vmRackInfo[key.toLowerCase()] = data[key];
-      });
-    })
-    .catch((err) => console.warn("Rack info not available:", err));
+function destroyChart(key) {
+  if (charts[key]) { charts[key].destroy(); charts[key] = null; }
 }
 
 // ============================================================
-// SERVER STATUS (with auto-refresh every 60s)
+// CHART DEFAULTS
+// ============================================================
+const PALETTE = ["#667eea","#64ffda","#ff6b6b","#ffd700","#43e97b","#4facfe","#ff9966","#a18fff","#38f9d7","#ff4b5c","#e040fb","#00bcd4"];
+
+function baseOpts(hideScales) {
+  const opts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: "#e0e0e0", font: { family: "'Segoe UI', system-ui, sans-serif" } } },
+      tooltip: { backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0", borderColor: "#2a2a40", borderWidth: 1 },
+    },
+  };
+  if (!hideScales) {
+    opts.scales = {
+      x: { ticks: { color: "#b0b0b0" }, grid: { color: "rgba(255,255,255,0.06)" } },
+      y: { ticks: { color: "#b0b0b0" }, grid: { color: "rgba(255,255,255,0.06)" } },
+    };
+  }
+  return opts;
+}
+
+// ============================================================
+// RACK INFO
+// ============================================================
+function loadRackInfo() {
+  return fetch("vm_rack_info.json?t=" + Date.now())
+    .then(r => r.json())
+    .then(data => { Object.keys(data).forEach(k => { state.vmRackInfo[k.toLowerCase()] = data[k]; }); })
+    .catch(err => console.warn("Rack info not available:", err));
+}
+
+// ============================================================
+// SERVER STATUS (auto-refresh 60s)
 // ============================================================
 function fetchServerStatus() {
   fetch("https://app2app.io/vptapi/Api/Task/GetRunningVm?VmId=0&TaskMasterId=0")
-    .then((res) => res.json())
-    .then((data) => {
-      const list =
-        data.data && data.data.vmMasterList ? data.data.vmMasterList : [];
-
-      const renderVm = (vm) => {
+    .then(r => r.json())
+    .then(data => {
+      const list = data.data?.vmMasterList || [];
+      const renderVm = vm => {
         const name = esc(vm.vmName || vm.vmId || "Unknown");
         const loc = state.vmRackInfo[name.toLowerCase()] || "";
-        const locHtml = loc
-          ? `<div style="font-size:13px;font-weight:500;margin-top:3px;color:#0000b3;">${esc(loc)}</div>`
-          : "";
-        const cls = vm.vmStatus === 1 ? "busy-server" : "free-server";
-        return `<span class="${cls}">${name}${locHtml}</span>`;
+        const locHtml = loc ? `<div style="font-size:13px;font-weight:500;margin-top:3px;color:#0000b3;">${esc(loc)}</div>` : "";
+        return `<span class="${vm.vmStatus === 1 ? "busy-server" : "free-server"}">${name}${locHtml}</span>`;
       };
-
-      const busyServers = list.filter((vm) => vm.vmStatus === 1);
-      const freeServers = list.filter((vm) => vm.vmStatus === 0);
-
+      const busy = list.filter(v => v.vmStatus === 1);
+      const free = list.filter(v => v.vmStatus === 0);
       const busyDiv = document.getElementById("busyServerStatus");
       const freeDiv = document.getElementById("freeServerStatus");
-
-      if (busyDiv)
-        busyDiv.innerHTML =
-          busyServers.length === 0
-            ? "No busy servers."
-            : busyServers.map(renderVm).join(" ");
-
-      if (freeDiv)
-        freeDiv.innerHTML =
-          freeServers.length === 0
-            ? "No free servers."
-            : freeServers.map(renderVm).join(" ");
-
-      // Update "last refreshed" timestamp
+      if (busyDiv) busyDiv.innerHTML = busy.length === 0 ? "No busy servers." : busy.map(renderVm).join(" ");
+      if (freeDiv) freeDiv.innerHTML = free.length === 0 ? "No free servers." : free.map(renderVm).join(" ");
       const ts = document.getElementById("serverStatusTimestamp");
-      if (ts)
-        ts.textContent =
-          "Last updated: " + new Date().toLocaleTimeString();
+      if (ts) ts.textContent = "Last updated: " + new Date().toLocaleTimeString();
+      // Utilization bar
+      const utilEl = document.getElementById("serverUtilSummary");
+      if (utilEl && list.length > 0) {
+        const pct = Math.round((busy.length / list.length) * 100);
+        utilEl.innerHTML = `
+          <div class="util-bar-wrap"><div class="util-bar" style="width:${pct}%"></div></div>
+          <span class="util-label">${busy.length} / ${list.length} VMs busy (${pct}%)</span>`;
+      }
     })
     .catch(() => {
-      const busyDiv = document.getElementById("busyServerStatus");
-      const freeDiv = document.getElementById("freeServerStatus");
-      if (busyDiv) busyDiv.innerHTML = "Error loading server status.";
-      if (freeDiv) freeDiv.innerHTML = "Error loading server status.";
+      ["busyServerStatus","freeServerStatus"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = "Error loading server status.";
+      });
     });
 }
 
@@ -141,12 +151,11 @@ function fetchServerStatus() {
 function loadMainData() {
   setTableMessage("#dataTable tbody", "Loading...", 7);
   fetch("data.json?t=" + Date.now())
-    .then((res) => res.json())
-    .then((data) => {
-      // Validate & normalise on load
+    .then(r => r.json())
+    .then(data => {
       state.raw = data
-        .filter((r) => r && typeof r === "object")
-        .map((r) => ({
+        .filter(r => r && typeof r === "object")
+        .map(r => ({
           ...r,
           extensionId: r.extensionId || "",
           extensionName: r.extensionName || "",
@@ -158,32 +167,14 @@ function loadMainData() {
           videoFilePath: r.videoFilePath || "",
           networkLogFilePath: r.networkLogFilePath || "",
         }));
-
-      // Sort newest first
-      state.raw.sort(
-        (a, b) =>
-          (parseDate(b.automationStart) || 0) -
-          (parseDate(a.automationStart) || 0)
-      );
-
-      fillSelect(
-        "extensionFilter",
-        state.raw.map((d) => d.extensionName),
-        "All Extensions"
-      );
-      fillSelect(
-        "networkFilter",
-        state.raw.flatMap((d) =>
-          d.networks ? d.networks.split(",").map((n) => n.trim()) : []
-        ),
-        "All Networks"
-      );
-
+      state.raw.sort((a, b) => (parseDate(b.automationStart) || 0) - (parseDate(a.automationStart) || 0));
+      fillSelect("extensionFilter", state.raw.map(d => d.extensionName), "All Extensions");
+      fillSelect("networkFilter", state.raw.flatMap(d => d.networks ? d.networks.split(",").map(n => n.trim()) : []), "All Networks");
       initializeDatePickers();
       applyFilters();
       initializeBrandData(state.raw);
     })
-    .catch((err) => {
+    .catch(err => {
       console.error("Error loading data:", err);
       setTableMessage("#dataTable tbody", "Failed to load data.", 7);
     });
@@ -193,211 +184,110 @@ function loadMainData() {
 // DATE PICKERS
 // ============================================================
 function initializeDatePickers() {
-  const fromPicker = flatpickr("#fromDate", {
-    dateFormat: "Y-m-d",
-    onChange: applyFilters,
-  });
-  const toPicker = flatpickr("#toDate", {
-    dateFormat: "Y-m-d",
-    onChange: applyFilters,
-  });
-
-  document.getElementById("clearFromDate")?.addEventListener("click", () => {
-    fromPicker.clear();
-    applyFilters();
-  });
-  document.getElementById("clearToDate")?.addEventListener("click", () => {
-    toPicker.clear();
-    applyFilters();
-  });
-
-  const brandFromPicker = flatpickr("#brandFromDate", {
-    dateFormat: "Y-m-d",
-    onChange: applyBrandFilters,
-  });
-  const brandToPicker = flatpickr("#brandToDate", {
-    dateFormat: "Y-m-d",
-    onChange: applyBrandFilters,
-  });
-
-  document
-    .getElementById("clearBrandFromDate")
-    ?.addEventListener("click", () => {
-      brandFromPicker.clear();
-      applyBrandFilters();
-    });
-  document
-    .getElementById("clearBrandToDate")
-    ?.addEventListener("click", () => {
-      brandToPicker.clear();
-      applyBrandFilters();
-    });
+  const fp = flatpickr("#fromDate", { dateFormat: "Y-m-d", onChange: applyFilters });
+  const tp = flatpickr("#toDate", { dateFormat: "Y-m-d", onChange: applyFilters });
+  document.getElementById("clearFromDate")?.addEventListener("click", () => { fp.clear(); applyFilters(); });
+  document.getElementById("clearToDate")?.addEventListener("click", () => { tp.clear(); applyFilters(); });
+  const bfp = flatpickr("#brandFromDate", { dateFormat: "Y-m-d", onChange: applyBrandFilters });
+  const btp = flatpickr("#brandToDate", { dateFormat: "Y-m-d", onChange: applyBrandFilters });
+  document.getElementById("clearBrandFromDate")?.addEventListener("click", () => { bfp.clear(); applyBrandFilters(); });
+  document.getElementById("clearBrandToDate")?.addEventListener("click", () => { btp.clear(); applyBrandFilters(); });
 }
 
 // ============================================================
-// REPORTS FILTERS
+// REPORTS FILTER
 // ============================================================
 function applyFilters() {
   const ext = document.getElementById("extensionFilter")?.value || "";
-  const extIdName = (
-    document.getElementById("extensionIdNameBox")?.value || ""
-  )
-    .trim()
-    .toLowerCase();
+  const extIdName = (document.getElementById("extensionIdNameBox")?.value || "").trim().toLowerCase();
   const network = document.getElementById("networkFilter")?.value || "";
   const from = document.getElementById("fromDate")?.value || "";
   const to = document.getElementById("toDate")?.value || "";
-  const search = (
-    document.getElementById("searchBox")?.value || ""
-  ).toLowerCase();
+  const search = (document.getElementById("searchBox")?.value || "").toLowerCase();
 
   let filtered = state.raw;
-
-  if (ext)
-    filtered = filtered.filter(
-      (d) => d.extensionName === ext || d.extensionId === ext
-    );
-  if (extIdName)
-    filtered = filtered.filter(
-      (d) =>
-        d.extensionName.toLowerCase().includes(extIdName) ||
-        d.extensionId.toLowerCase().includes(extIdName)
-    );
-  if (network)
-    filtered = filtered.filter((d) =>
-      d.networks.toLowerCase().includes(network.toLowerCase())
-    );
-  if (from) {
-    const fromDate = parseDate(from);
-    if (fromDate)
-      filtered = filtered.filter(() => {
-        // handled below via string compare (ISO safe)
-        return true;
-      });
-    filtered = filtered.filter((d) => d.automationStart >= from);
-  }
-  if (to)
-    filtered = filtered.filter(
-      (d) => d.automationStart <= to + "T23:59:59"
-    );
-  if (search)
-    filtered = filtered.filter(
-      (d) =>
-        d.keyword.toLowerCase().includes(search) ||
-        d.voilationTypeFLP.toLowerCase().includes(search) ||
-        d.networks.toLowerCase().includes(search) ||
-        d.incidenceId.toString().includes(search) ||
-        d.extensionName.toLowerCase().includes(search)
-    );
+  if (ext) filtered = filtered.filter(d => d.extensionName === ext || d.extensionId === ext);
+  if (extIdName) filtered = filtered.filter(d => d.extensionName.toLowerCase().includes(extIdName) || d.extensionId.toLowerCase().includes(extIdName));
+  if (network) filtered = filtered.filter(d => d.networks.toLowerCase().includes(network.toLowerCase()));
+  if (from) filtered = filtered.filter(d => d.automationStart >= from);
+  if (to) filtered = filtered.filter(d => d.automationStart <= to + "T23:59:59");
+  if (search) filtered = filtered.filter(d =>
+    d.keyword.toLowerCase().includes(search) ||
+    d.voilationTypeFLP.toLowerCase().includes(search) ||
+    d.networks.toLowerCase().includes(search) ||
+    d.incidenceId.toString().includes(search) ||
+    d.extensionName.toLowerCase().includes(search)
+  );
 
   state.filtered = filtered;
   updateDashboard(filtered);
+  renderAnalyticsCharts(filtered);
 }
 
 // ============================================================
-// DASHBOARD KPI + TABLE
+// DASHBOARD KPIs + TABLE
 // ============================================================
 function updateDashboard(data) {
   document.getElementById("totalRecords").textContent = data.length;
-  document.getElementById("uniqueExtensions").textContent = new Set(
-    data.map((d) => d.extensionId)
-  ).size;
-  document.getElementById("uniqueBrands").textContent = new Set(
-    data.map((d) => d.keyword.toLowerCase())
-  ).size;
-  document.getElementById("latestDate").textContent = data.length
-    ? fmtDate(data[0].automationStart)
-    : "-";
-
+  document.getElementById("uniqueExtensions").textContent = new Set(data.map(d => d.extensionId)).size;
+  document.getElementById("uniqueBrands").textContent = new Set(data.map(d => d.keyword.toLowerCase())).size;
+  document.getElementById("latestDate").textContent = data.length ? fmtDate(data[0].automationStart) : "-";
   renderReportsTable(data);
 }
 
-// Pagination state
 const PAGE_SIZE = 100;
 let currentPage = 1;
 
 function renderReportsTable(data) {
   const tbody = document.querySelector("#dataTable tbody");
   if (!tbody) return;
-
   if (data.length === 0) {
     setTableMessage("#dataTable tbody", "No records match your filters.", 7);
     renderPagination(0, "#reportsPagination");
     return;
   }
-
   const totalPages = Math.ceil(data.length / PAGE_SIZE);
   if (currentPage > totalPages) currentPage = 1;
-
-  const start = (currentPage - 1) * PAGE_SIZE;
-  const pageData = data.slice(start, start + PAGE_SIZE);
-
+  const pageData = data.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   tbody.innerHTML = "";
-  const fragment = document.createDocumentFragment();
-  pageData.forEach((r) => {
+  const frag = document.createDocumentFragment();
+  pageData.forEach(r => {
     const tr = document.createElement("tr");
-
-    // Safe link building
-    const videoLink = r.videoFilePath
-      ? `<a href="${esc(r.videoFilePath)}" target="_blank" rel="noopener">View</a>`
-      : "-";
-    const logLink = r.networkLogFilePath
-      ? `<a href="https://app2app.io/sazviewer/?url=${esc(r.networkLogFilePath)}" target="_blank" rel="noopener">View</a>`
-      : "-";
-
-    // Use textContent for data cells to prevent XSS
-    const incidentTd = document.createElement("td");
-    incidentTd.innerHTML = `<div><b>${esc(r.incidenceId || "-")}</b></div><div style="font-size:12px;color:#888;">${esc(fmtDate(r.automationStart))}</div>`;
-
-    const extTd = document.createElement("td");
-    extTd.innerHTML = `${esc(r.extensionName || "-")}<br><span style="font-size:12px;color:#888;">${esc(r.extensionId)}</span>`;
-
-    const brandTd = document.createElement("td");
-    brandTd.textContent = r.keyword || "-";
-
-    const violationTd = document.createElement("td");
-    violationTd.textContent = r.voilationTypeFLP || "-";
-
-    const networkTd = document.createElement("td");
-    networkTd.textContent = r.networks || "-";
-
-    const videoTd = document.createElement("td");
-    videoTd.innerHTML = videoLink;
-
-    const logTd = document.createElement("td");
-    logTd.innerHTML = logLink;
-
-    tr.append(incidentTd, extTd, brandTd, violationTd, networkTd, videoTd, logTd);
-    fragment.appendChild(tr);
+    const videoLink = r.videoFilePath ? `<a href="${esc(r.videoFilePath)}" target="_blank" rel="noopener">View</a>` : "-";
+    const logLink = r.networkLogFilePath ? `<a href="https://app2app.io/sazviewer/?url=${esc(r.networkLogFilePath)}" target="_blank" rel="noopener">View</a>` : "-";
+    const iTd = document.createElement("td");
+    iTd.innerHTML = `<div><b>${esc(r.incidenceId || "-")}</b></div><div style="font-size:12px;color:#888;">${esc(fmtDate(r.automationStart))}</div>`;
+    const eTd = document.createElement("td");
+    eTd.innerHTML = `${esc(r.extensionName || "-")}<br><span style="font-size:12px;color:#888;">${esc(r.extensionId)}</span>`;
+    const bTd = document.createElement("td"); bTd.textContent = r.keyword || "-";
+    const vTd = document.createElement("td"); vTd.textContent = r.voilationTypeFLP || "-";
+    const nTd = document.createElement("td"); nTd.textContent = r.networks || "-";
+    const viTd = document.createElement("td"); viTd.innerHTML = videoLink;
+    const lTd = document.createElement("td"); lTd.innerHTML = logLink;
+    tr.append(iTd, eTd, bTd, vTd, nTd, viTd, lTd);
+    frag.appendChild(tr);
   });
-  tbody.appendChild(fragment);
-
+  tbody.appendChild(frag);
   renderPagination(data.length, "#reportsPagination");
 }
 
 function renderPagination(total, containerId) {
   const container = document.querySelector(containerId);
   if (!container) return;
-
   const totalPages = Math.ceil(total / PAGE_SIZE);
   if (totalPages <= 1) {
-    container.innerHTML = total > 0
-      ? `<span class="page-info">Showing ${total} records</span>`
-      : "";
+    container.innerHTML = total > 0 ? `<span class="page-info">Showing ${total} records</span>` : "";
     return;
   }
-
   const start = (currentPage - 1) * PAGE_SIZE + 1;
   const end = Math.min(currentPage * PAGE_SIZE, total);
-
   container.innerHTML = `
     <span class="page-info">Showing ${start}–${end} of ${total} records</span>
     <div class="page-btns">
       <button class="page-btn" onclick="changePage(-1)" ${currentPage === 1 ? "disabled" : ""}>← Prev</button>
       <span class="page-num">Page ${currentPage} / ${totalPages}</span>
       <button class="page-btn" onclick="changePage(1)" ${currentPage === totalPages ? "disabled" : ""}>Next →</button>
-    </div>
-  `;
+    </div>`;
 }
 
 function changePage(dir) {
@@ -407,242 +297,412 @@ function changePage(dir) {
 }
 
 // ============================================================
-// BRAND MANAGEMENT
+// ═══  ANALYTICS CHARTS — Reports Tab  ═══════════════════════
 // ============================================================
+
+function renderAnalyticsCharts(data) {
+  renderTimelineChart(data);
+  renderViolationDonut(data);
+  renderNetworkDistChart(data);
+  renderExtensionRiskTable(data);
+}
+
+// 1. Findings Over Time
+function renderTimelineChart(data) {
+  destroyChart("timeline");
+  const ctx = document.getElementById("timelineChart");
+  if (!ctx) return;
+  const dateCounts = {};
+  data.forEach(r => {
+    const d = fmtDate(r.automationStart);
+    if (d !== "-") dateCounts[d] = (dateCounts[d] || 0) + 1;
+  });
+  const labels = Object.keys(dateCounts).sort();
+  const values = labels.map(l => dateCounts[l]);
+  const opts = baseOpts();
+  opts.plugins.legend.display = false;
+  opts.scales.x.ticks.maxTicksLimit = 14;
+  opts.scales.x.ticks.maxRotation = 45;
+  charts.timeline = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Findings",
+        data: values,
+        backgroundColor: "rgba(102,126,234,0.75)",
+        borderColor: "#667eea",
+        borderWidth: 1,
+        borderRadius: 4,
+        hoverBackgroundColor: "#64ffda",
+      }],
+    },
+    options: opts,
+  });
+}
+
+// 2. Violation Type Donut
+function renderViolationDonut(data) {
+  destroyChart("violations");
+  const ctx = document.getElementById("violationsChart");
+  if (!ctx) return;
+  const counts = {};
+  data.forEach(r => {
+    const v = r.voilationTypeFLP || "Unknown";
+    counts[v] = (counts[v] || 0) + 1;
+  });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  charts.violations = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: sorted.map(([k]) => k),
+      datasets: [{ data: sorted.map(([, v]) => v), backgroundColor: PALETTE, borderColor: "#0f0f23", borderWidth: 2, hoverOffset: 8 }],
+    },
+    options: {
+      ...baseOpts(true),
+      cutout: "60%",
+      plugins: {
+        legend: { position: "right", labels: { color: "#e0e0e0", padding: 12, boxWidth: 14 } },
+        tooltip: { backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0", borderColor: "#2a2a40", borderWidth: 1 },
+      },
+    },
+  });
+}
+
+// 3. Network Distribution
+function renderNetworkDistChart(data) {
+  destroyChart("networkDist");
+  const ctx = document.getElementById("networkDistChart");
+  if (!ctx) return;
+  const counts = {};
+  data.forEach(r => {
+    if (r.networks) r.networks.split(",").forEach(n => { const net = n.trim(); if (net) counts[net] = (counts[net] || 0) + 1; });
+  });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 12);
+  const opts = baseOpts();
+  opts.indexAxis = "y";
+  opts.plugins.legend.display = false;
+  charts.networkDist = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: sorted.map(([k]) => k),
+      datasets: [{ label: "Findings", data: sorted.map(([, v]) => v), backgroundColor: sorted.map((_, i) => PALETTE[i % PALETTE.length]), borderRadius: 4 }],
+    },
+    options: opts,
+  });
+}
+
+// 4. Extension Risk Score
+const VIOLATION_WEIGHTS = { "critical": 5, "high": 4, "medium": 3, "low": 2 };
+function getViolationWeight(v) {
+  const lv = (v || "").toLowerCase();
+  for (const [k, w] of Object.entries(VIOLATION_WEIGHTS)) { if (lv.includes(k)) return w; }
+  return 2;
+}
+
+function computeExtensionRisk(data) {
+  const extMap = {};
+  data.forEach(r => {
+    const id = r.extensionId || "Unknown";
+    if (!extMap[id]) extMap[id] = { id, name: r.extensionName || id, brands: new Set(), violations: [], networks: new Set(), findings: 0 };
+    extMap[id].brands.add(r.keyword.toLowerCase());
+    extMap[id].violations.push(r.voilationTypeFLP);
+    extMap[id].networks.add(r.networks);
+    extMap[id].findings++;
+  });
+  return Object.values(extMap).map(ext => {
+    const avgWeight = ext.violations.reduce((s, v) => s + getViolationWeight(v), 0) / (ext.violations.length || 1);
+    const score = Math.round(ext.brands.size * avgWeight * Math.log1p(ext.findings));
+    return { ...ext, uniqueBrands: ext.brands.size, uniqueNetworks: ext.networks.size, score };
+  }).sort((a, b) => b.score - a.score);
+}
+
+function renderExtensionRiskTable(data) {
+  const tbody = document.querySelector("#extensionRiskTable tbody");
+  if (!tbody) return;
+  const riskData = computeExtensionRisk(data).slice(0, 20);
+  if (riskData.length === 0) { setTableMessage("#extensionRiskTable tbody", "No data available.", 5); return; }
+  const maxScore = riskData[0].score || 1;
+  tbody.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  riskData.forEach((ext, idx) => {
+    const tr = document.createElement("tr");
+    const lvl = ext.score >= maxScore * 0.7 ? "risk-high" : ext.score >= maxScore * 0.35 ? "risk-med" : "risk-low";
+    const lbl = ext.score >= maxScore * 0.7 ? "HIGH" : ext.score >= maxScore * 0.35 ? "MED" : "LOW";
+    const pct = Math.round((ext.score / maxScore) * 100);
+    const rankTd = document.createElement("td"); rankTd.innerHTML = `<span class="rank-num">#${idx + 1}</span>`;
+    const nameTd = document.createElement("td"); nameTd.innerHTML = `<b>${esc(ext.name)}</b><br><span style="font-size:11px;color:#666;">${esc(ext.id)}</span>`;
+    const fTd = document.createElement("td"); fTd.textContent = ext.findings;
+    const bTd = document.createElement("td"); bTd.textContent = ext.uniqueBrands;
+    const sTd = document.createElement("td");
+    sTd.innerHTML = `
+      <div class="risk-score-wrap">
+        <span class="risk-badge ${lvl}">${lbl}</span>
+        <div class="risk-bar-bg"><div class="risk-bar-fill ${lvl}" style="width:${pct}%"></div></div>
+        <span class="risk-num">${ext.score}</span>
+      </div>`;
+    tr.append(rankTd, nameTd, fTd, bTd, sTd);
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+}
+
+// ============================================================
+// ═══  BRAND MANAGEMENT + TREND INDICATORS  ══════════════════
+// ============================================================
+
+function getWeekBucket(dateStr) {
+  const d = parseDate(dateStr);
+  if (!d) return null;
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  return monday.toISOString().split("T")[0];
+}
+
+function computeTrend(findings) {
+  const now = new Date();
+  const thisWeekStart = new Date(now);
+  const dow = now.getDay();
+  thisWeekStart.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+  thisWeekStart.setHours(0, 0, 0, 0);
+  const lastWeekStart = new Date(thisWeekStart);
+  lastWeekStart.setDate(thisWeekStart.getDate() - 7);
+  let thisWeek = 0, lastWeek = 0;
+  findings.forEach(f => {
+    const d = parseDate(f.automationStart);
+    if (!d) return;
+    if (d >= thisWeekStart) thisWeek++;
+    else if (d >= lastWeekStart) lastWeek++;
+  });
+  return { thisWeek, lastWeek, diff: thisWeek - lastWeek };
+}
+
+function trendArrow(trend) {
+  if (trend.diff > 0) return `<span class="trend-up">↑ +${trend.diff}</span>`;
+  if (trend.diff < 0) return `<span class="trend-down">↓ ${trend.diff}</span>`;
+  return `<span class="trend-flat">→ 0</span>`;
+}
+
+function computeFirstSeen(findings) {
+  let earliest = null;
+  findings.forEach(f => { const d = parseDate(f.automationStart); if (d && (!earliest || d < earliest)) earliest = d; });
+  return earliest ? earliest.toISOString().split("T")[0] : "-";
+}
+
 function initializeBrandData(data) {
   const brandMap = {};
-  data.forEach((record) => {
+  data.forEach(record => {
     const brandKey = record.keyword.toLowerCase();
-    const brandDisplay = record.keyword; // preserve original casing
-
-    if (!brandMap[brandKey]) {
-      brandMap[brandKey] = {
-        brand: brandDisplay,
-        brandKey,
-        findings: [],
-        extensionIds: new Set(),
-        latestDate: record.automationStart,
-      };
-    }
+    const brandDisplay = record.keyword;
+    if (!brandMap[brandKey]) brandMap[brandKey] = { brand: brandDisplay, brandKey, findings: [], extensionIds: new Set(), latestDate: record.automationStart };
     brandMap[brandKey].findings.push(record);
     brandMap[brandKey].extensionIds.add(record.extensionId);
-
     const recDate = parseDate(record.automationStart);
     const curDate = parseDate(brandMap[brandKey].latestDate);
-    if (recDate && curDate && recDate > curDate) {
-      brandMap[brandKey].latestDate = record.automationStart;
-    }
+    if (recDate && curDate && recDate > curDate) brandMap[brandKey].latestDate = record.automationStart;
   });
-
-  state.brandData = Object.values(brandMap)
-    .map((item) => ({
-      brand: item.brand,
-      brandKey: item.brandKey,
-      totalFindings: item.findings.length,
-      uniqueExtensions: item.extensionIds.size,
-      latestDate: item.latestDate,
-      findings: item.findings,
-    }))
-    .sort((a, b) => b.totalFindings - a.totalFindings);
+  state.brandData = Object.values(brandMap).map(item => ({
+    brand: item.brand, brandKey: item.brandKey,
+    totalFindings: item.findings.length,
+    uniqueExtensions: item.extensionIds.size,
+    latestDate: item.latestDate,
+    firstSeen: computeFirstSeen(item.findings),
+    trend: computeTrend(item.findings),
+    findings: item.findings,
+  })).sort((a, b) => b.totalFindings - a.totalFindings);
 
   updateBrandKPIs(state.brandData);
   updateBrandSummaryTable(state.brandData);
+  renderTopBrandsChart(state.brandData);
 }
 
 function applyBrandFilters() {
   const from = document.getElementById("brandFromDate")?.value || "";
   const to = document.getElementById("brandToDate")?.value || "";
-  const search = (
-    document.getElementById("brandSearchBox")?.value || ""
-  ).toLowerCase();
+  const search = (document.getElementById("brandSearchBox")?.value || "").toLowerCase();
 
-  let filtered = state.brandData.map((item) => {
-    let validFindings = item.findings;
+  let filtered = state.brandData.map(item => {
+    let vf = item.findings;
+    if (from) vf = vf.filter(f => f.automationStart >= from);
+    if (to) vf = vf.filter(f => f.automationStart <= to + "T23:59:59");
+    const latestDate = vf.length ? vf.reduce((max, f) => (parseDate(f.automationStart) || 0) > (parseDate(max) || 0) ? f.automationStart : max, "") : "";
+    return { ...item, findings: vf, totalFindings: vf.length, uniqueExtensions: new Set(vf.map(f => f.extensionId)).size, latestDate, firstSeen: computeFirstSeen(vf), trend: computeTrend(vf) };
+  }).filter(item => item.totalFindings > 0);
 
-    if (from)
-      validFindings = validFindings.filter(
-        (f) => f.automationStart >= from
-      );
-    if (to)
-      validFindings = validFindings.filter(
-        (f) => f.automationStart <= to + "T23:59:59"
-      );
-
-    const latestDate = validFindings.length
-      ? validFindings.reduce(
-          (max, f) =>
-            (parseDate(f.automationStart) || 0) > (parseDate(max) || 0)
-              ? f.automationStart
-              : max,
-          ""
-        )
-      : "";
-
-    return {
-      ...item,
-      findings: validFindings,
-      totalFindings: validFindings.length,
-      uniqueExtensions: new Set(validFindings.map((f) => f.extensionId)).size,
-      latestDate,
-    };
-  }).filter((item) => item.totalFindings > 0);
-
-  if (search)
-    filtered = filtered.filter((item) =>
-      item.brand.toLowerCase().includes(search)
-    );
-
+  if (search) filtered = filtered.filter(item => item.brand.toLowerCase().includes(search));
   filtered.sort((a, b) => b.totalFindings - a.totalFindings);
-
   state.filteredBrandData = filtered;
   updateBrandSummaryTable(filtered);
   updateBrandKPIs(filtered);
+  renderTopBrandsChart(filtered);
 }
 
 function updateBrandKPIs(data) {
   document.getElementById("totalBrands").textContent = data.length;
-  const totalFindings = data.reduce((sum, item) => sum + item.totalFindings, 0);
-  document.getElementById("totalBrandFindings").textContent = totalFindings;
-  const avg = data.length > 0 ? (totalFindings / data.length).toFixed(1) : "0";
-  document.getElementById("avgFindingsPerBrand").textContent = avg;
+  const total = data.reduce((s, i) => s + i.totalFindings, 0);
+  document.getElementById("totalBrandFindings").textContent = total;
+  document.getElementById("avgFindingsPerBrand").textContent = data.length > 0 ? (total / data.length).toFixed(1) : "0";
+  const chronic = data.filter(b => {
+    const first = parseDate(b.firstSeen); const last = parseDate(b.latestDate);
+    return first && last && (last - first) >= 14 * 24 * 60 * 60 * 1000;
+  });
+  const el = document.getElementById("chronicBrands");
+  if (el) el.textContent = chronic.length;
 }
 
 function updateBrandSummaryTable(data) {
   state.filteredBrandData = data;
   const tbody = document.querySelector("#brandTable tbody");
   if (!tbody) return;
-
-  document.getElementById("brandTableSubtitle").textContent =
-    `Showing ${data.length} brands`;
-
-  if (data.length === 0) {
-    setTableMessage("#brandTable tbody", "No brands match your filters.", 4);
-    return;
-  }
+  document.getElementById("brandTableSubtitle").textContent = `Showing ${data.length} brands`;
+  if (data.length === 0) { setTableMessage("#brandTable tbody", "No brands match your filters.", 6); return; }
 
   tbody.innerHTML = "";
-  const fragment = document.createDocumentFragment();
-  data.forEach((item) => {
+  const frag = document.createDocumentFragment();
+  data.forEach(item => {
     const tr = document.createElement("tr");
     tr.style.cursor = "pointer";
     tr.addEventListener("click", () => showBrandDetails(item));
+    const isNew = item.firstSeen !== "-" && (new Date() - parseDate(item.firstSeen)) < 7 * 24 * 60 * 60 * 1000;
+    const newBadge = isNew ? `<span class="new-badge">NEW</span>` : "";
+    const weeks = new Set(item.findings.map(f => getWeekBucket(f.automationStart)).filter(Boolean));
+    const repeatFlag = weeks.size >= 3 ? `<span class="repeat-badge">🔁 Repeat</span>` : "";
 
-    const brandTd = document.createElement("td");
-    brandTd.innerHTML = `<b>${esc(item.brand)}</b>`;
-
-    const findingsTd = document.createElement("td");
-    findingsTd.innerHTML = `<span class="badge">${item.totalFindings}</span>`;
-
-    const extTd = document.createElement("td");
-    extTd.textContent = item.uniqueExtensions;
-
-    const dateTd = document.createElement("td");
-    dateTd.textContent = fmtDate(item.latestDate);
-
-    tr.append(brandTd, findingsTd, extTd, dateTd);
-    fragment.appendChild(tr);
+    const bTd = document.createElement("td"); bTd.innerHTML = `<b>${esc(item.brand)}</b> ${newBadge}`;
+    const fTd = document.createElement("td"); fTd.innerHTML = `<span class="badge">${item.totalFindings}</span>`;
+    const eTd = document.createElement("td"); eTd.textContent = item.uniqueExtensions;
+    const tTd = document.createElement("td");
+    tTd.innerHTML = trendArrow(item.trend) + `<span style="font-size:11px;color:#555;margin-left:6px;">this wk: ${item.trend.thisWeek}</span>`;
+    const dTd = document.createElement("td");
+    dTd.innerHTML = `<div>${esc(fmtDate(item.latestDate))}</div><div style="font-size:11px;color:#555;">since ${esc(item.firstSeen)}</div>`;
+    const rTd = document.createElement("td"); rTd.innerHTML = repeatFlag || `<span style="color:#444;font-size:12px;">—</span>`;
+    tr.append(bTd, fTd, eTd, tTd, dTd, rTd);
+    frag.appendChild(tr);
   });
-  tbody.appendChild(fragment);
+  tbody.appendChild(frag);
 }
 
+// Top 15 Brands Chart
+function renderTopBrandsChart(data) {
+  destroyChart("topBrands");
+  const ctx = document.getElementById("topBrandsChart");
+  if (!ctx) return;
+  const top = data.slice(0, 15);
+  const opts = baseOpts();
+  opts.indexAxis = "y";
+  opts.plugins.legend.display = false;
+  opts.scales.x.ticks.stepSize = 1;
+  charts.topBrands = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: top.map(b => b.brand),
+      datasets: [{
+        label: "Findings",
+        data: top.map(b => b.totalFindings),
+        backgroundColor: top.map(b => b.trend.diff > 0 ? "rgba(255,107,107,0.8)" : b.trend.diff < 0 ? "rgba(67,233,123,0.8)" : "rgba(102,126,234,0.8)"),
+        borderRadius: 4,
+      }],
+    },
+    options: opts,
+  });
+}
+
+// Brand Detail — show/close
 function showBrandDetails(brandItem) {
   const detailSection = document.getElementById("brandDetailsSection");
   const summaryTable = document.getElementById("brandTable")?.closest(".table-section");
-
-  if (detailSection) {
-    detailSection.style.display = "block";
-    detailSection.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+  const summaryChart = document.getElementById("topBrandsChartSection");
+  if (detailSection) { detailSection.style.display = "block"; detailSection.scrollIntoView({ behavior: "smooth", block: "start" }); }
   if (summaryTable) summaryTable.style.display = "none";
-
+  if (summaryChart) summaryChart.style.display = "none";
   updateBrandDetailsTable(brandItem.brand, brandItem.findings);
+  renderBrandNetworkMiniChart(brandItem.findings, brandItem.brand);
 }
 
 function closeBrandDetails() {
   const detailSection = document.getElementById("brandDetailsSection");
   const summaryTable = document.getElementById("brandTable")?.closest(".table-section");
-
+  const summaryChart = document.getElementById("topBrandsChartSection");
   if (detailSection) detailSection.style.display = "none";
   if (summaryTable) summaryTable.style.display = "";
+  if (summaryChart) summaryChart.style.display = "";
 }
 
 function updateBrandDetailsTable(brandName, findings) {
   state.filteredBrandDetails = findings;
   const tbody = document.querySelector("#brandDetailsTable tbody");
   if (!tbody) return;
-
+  const uniqueExts = new Set(findings.map(f => f.extensionId)).size;
   const infoEl = document.getElementById("brandDetailInfo");
-  const uniqueExts = new Set(findings.map((f) => f.extensionId)).size;
-  if (infoEl)
-    infoEl.textContent = `${brandName}: ${findings.length} findings across ${uniqueExts} extension(s)`;
-
-  if (findings.length === 0) {
-    setTableMessage("#brandDetailsTable tbody", "No findings found.", 6);
-    return;
-  }
-
+  if (infoEl) infoEl.textContent = `${brandName}: ${findings.length} findings across ${uniqueExts} extension(s)`;
+  if (findings.length === 0) { setTableMessage("#brandDetailsTable tbody", "No findings found.", 6); return; }
   tbody.innerHTML = "";
-  const fragment = document.createDocumentFragment();
-  findings.forEach((r) => {
+  const frag = document.createDocumentFragment();
+  findings.forEach(r => {
     const tr = document.createElement("tr");
-
-    const videoLink = r.videoFilePath
-      ? `<a href="${esc(r.videoFilePath)}" target="_blank" rel="noopener">View</a>`
-      : "-";
-    const logLink = r.networkLogFilePath
-      ? `<a href="https://app2app.io/sazviewer/?url=${esc(r.networkLogFilePath)}" target="_blank" rel="noopener">View</a>`
-      : "-";
-
-    const incidentTd = document.createElement("td");
-    incidentTd.innerHTML = `<div><b>${esc(r.incidenceId || "-")}</b></div><div style="font-size:12px;color:#888;">${esc(fmtDate(r.automationStart))}</div>`;
-
-    const extTd = document.createElement("td");
-    extTd.innerHTML = `${esc(r.extensionName || "-")}<br><span style="font-size:12px;color:#888;">${esc(r.extensionId)}</span>`;
-
-    const violTd = document.createElement("td");
-    violTd.textContent = r.voilationTypeFLP || "-";
-
-    const netTd = document.createElement("td");
-    netTd.textContent = r.networks || "-";
-
-    const videoTd = document.createElement("td");
-    videoTd.innerHTML = videoLink;
-
-    const logTd = document.createElement("td");
-    logTd.innerHTML = logLink;
-
-    tr.append(incidentTd, extTd, violTd, netTd, videoTd, logTd);
-    fragment.appendChild(tr);
+    const videoLink = r.videoFilePath ? `<a href="${esc(r.videoFilePath)}" target="_blank" rel="noopener">View</a>` : "-";
+    const logLink = r.networkLogFilePath ? `<a href="https://app2app.io/sazviewer/?url=${esc(r.networkLogFilePath)}" target="_blank" rel="noopener">View</a>` : "-";
+    const iTd = document.createElement("td"); iTd.innerHTML = `<div><b>${esc(r.incidenceId || "-")}</b></div><div style="font-size:12px;color:#888;">${esc(fmtDate(r.automationStart))}</div>`;
+    const eTd = document.createElement("td"); eTd.innerHTML = `${esc(r.extensionName || "-")}<br><span style="font-size:12px;color:#888;">${esc(r.extensionId)}</span>`;
+    const vTd = document.createElement("td"); vTd.textContent = r.voilationTypeFLP || "-";
+    const nTd = document.createElement("td"); nTd.textContent = r.networks || "-";
+    const viTd = document.createElement("td"); viTd.innerHTML = videoLink;
+    const lTd = document.createElement("td"); lTd.innerHTML = logLink;
+    tr.append(iTd, eTd, vTd, nTd, viTd, lTd);
+    frag.appendChild(tr);
   });
-  tbody.appendChild(fragment);
+  tbody.appendChild(frag);
+}
+
+// Brand detail — network mini donut
+function renderBrandNetworkMiniChart(findings, brandName) {
+  destroyChart("brandNetwork");
+  const ctx = document.getElementById("brandNetworkChart");
+  if (!ctx) return;
+  const counts = {};
+  findings.forEach(f => {
+    if (f.networks) f.networks.split(",").forEach(n => { const net = n.trim(); if (net) counts[net] = (counts[net] || 0) + 1; });
+  });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (sorted.length === 0) return;
+  charts.brandNetwork = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: sorted.map(([k]) => k),
+      datasets: [{ data: sorted.map(([, v]) => v), backgroundColor: PALETTE, borderColor: "#0f0f23", borderWidth: 2 }],
+    },
+    options: {
+      ...baseOpts(true),
+      cutout: "55%",
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#e0e0e0", padding: 10, boxWidth: 12, font: { size: 11 } } },
+        title: { display: true, text: `Networks — ${brandName}`, color: "#64ffda", font: { size: 13 } },
+        tooltip: { backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0", borderColor: "#2a2a40", borderWidth: 1 },
+      },
+    },
+  });
 }
 
 // ============================================================
-// VM ADWARE
+// ═══  VM ADWARE + CHART  ═════════════════════════════════════
 // ============================================================
+
 function fetchVmWiseAdware() {
   setTableMessage("#vmAdwareTable tbody", "Loading...", 4);
   fetch("https://app2app.io/vptapi/Api/Master/GetvmWiseAdware")
-    .then((res) => res.json())
-    .then((data) => {
-      if (data && data.data && data.data.list) {
+    .then(r => r.json())
+    .then(data => {
+      if (data?.data?.list) {
         state.vmAdwareData = data.data.list;
-        fillSelect(
-          "vmFilter",
-          state.vmAdwareData.map((d) => d.vmName),
-          "All VMs"
-        );
-        fillSelect(
-          "vmAdwareExtensionFilter",
-          state.vmAdwareData.map((d) => d.extensionName),
-          "All Extensions"
-        );
+        fillSelect("vmFilter", state.vmAdwareData.map(d => d.vmName), "All VMs");
+        fillSelect("vmAdwareExtensionFilter", state.vmAdwareData.map(d => d.extensionName), "All Extensions");
         applyVmAdwareFilters();
       } else {
         setTableMessage("#vmAdwareTable tbody", "No VM adware data available.", 4);
       }
     })
-    .catch((err) => {
+    .catch(err => {
       console.error("Error loading VM Adware data:", err);
       setTableMessage("#vmAdwareTable tbody", "Error loading VM adware data.", 4);
     });
@@ -650,99 +710,79 @@ function fetchVmWiseAdware() {
 
 function applyVmAdwareFilters() {
   const selectedVm = document.getElementById("vmFilter")?.value || "";
-  const selectedExt =
-    document.getElementById("vmAdwareExtensionFilter")?.value || "";
-  const searchTerm = (
-    document.getElementById("vmAdwareSearchBox")?.value || ""
-  )
-    .trim()
-    .toLowerCase();
-
+  const selectedExt = document.getElementById("vmAdwareExtensionFilter")?.value || "";
+  const searchTerm = (document.getElementById("vmAdwareSearchBox")?.value || "").trim().toLowerCase();
   let filtered = state.vmAdwareData;
-  if (selectedVm) filtered = filtered.filter((d) => d.vmName === selectedVm);
-  if (selectedExt)
-    filtered = filtered.filter((d) => d.extensionName === selectedExt);
-  if (searchTerm)
-    filtered = filtered.filter(
-      (d) =>
-        (d.extensionName || "").toLowerCase().includes(searchTerm) ||
-        (d.extensionId || "").toLowerCase().includes(searchTerm)
-    );
-
+  if (selectedVm) filtered = filtered.filter(d => d.vmName === selectedVm);
+  if (selectedExt) filtered = filtered.filter(d => d.extensionName === selectedExt);
+  if (searchTerm) filtered = filtered.filter(d => (d.extensionName || "").toLowerCase().includes(searchTerm) || (d.extensionId || "").toLowerCase().includes(searchTerm));
   state.filteredVmAdwareData = filtered;
   updateVmAdwareTable(filtered);
+  renderVmAdwareChart(filtered);
 }
 
 function updateVmAdwareTable(data) {
   const tbody = document.querySelector("#vmAdwareTable tbody");
   if (!tbody) return;
-
-  if (data.length === 0) {
-    setTableMessage("#vmAdwareTable tbody", "No results found.", 4);
-    return;
-  }
-
+  if (data.length === 0) { setTableMessage("#vmAdwareTable tbody", "No results found.", 4); return; }
   tbody.innerHTML = "";
-  const fragment = document.createDocumentFragment();
-  data.forEach((r) => {
+  const frag = document.createDocumentFragment();
+  data.forEach(r => {
     const tr = document.createElement("tr");
     const dateStr = r.createddate ? r.createddate.split(" ")[0] : "-";
     const vmName = r.vmName || "Unknown";
     const loc = state.vmRackInfo[vmName.toLowerCase()] || "";
     const vmDisplay = loc ? `${vmName} — ${loc}` : vmName;
-
-    const extIdTd = document.createElement("td");
-    extIdTd.textContent = r.extensionId || "-";
-
-    const extNameTd = document.createElement("td");
-    extNameTd.innerHTML = `${esc(r.extensionName || "-")}<br><span style="font-size:12px;color:#64ffda;">${esc(vmDisplay)}</span>`;
-
-    const browserTd = document.createElement("td");
-    browserTd.textContent = r.browser || "-";
-
-    const dateTd = document.createElement("td");
-    dateTd.textContent = dateStr;
-
-    tr.append(extIdTd, extNameTd, browserTd, dateTd);
-    fragment.appendChild(tr);
+    const eTd = document.createElement("td"); eTd.textContent = r.extensionId || "-";
+    const nTd = document.createElement("td"); nTd.innerHTML = `${esc(r.extensionName || "-")}<br><span style="font-size:12px;color:#64ffda;">${esc(vmDisplay)}</span>`;
+    const bTd = document.createElement("td"); bTd.textContent = r.browser || "-";
+    const dTd = document.createElement("td"); dTd.textContent = dateStr;
+    tr.append(eTd, nTd, bTd, dTd);
+    frag.appendChild(tr);
   });
-  tbody.appendChild(fragment);
+  tbody.appendChild(frag);
+}
+
+function renderVmAdwareChart(data) {
+  destroyChart("vmAdware");
+  const ctx = document.getElementById("vmAdwareChart");
+  if (!ctx) return;
+  const vmCounts = {};
+  data.forEach(r => { const vm = r.vmName || "Unknown"; vmCounts[vm] = (vmCounts[vm] || 0) + 1; });
+  const sorted = Object.entries(vmCounts).sort((a, b) => b[1] - a[1]);
+  if (sorted.length === 0) return;
+  const opts = baseOpts();
+  opts.plugins.legend.display = false;
+  opts.scales.x.ticks.maxRotation = 40;
+  charts.vmAdware = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: sorted.map(([k]) => k),
+      datasets: [{ label: "Adware Count", data: sorted.map(([, v]) => v), backgroundColor: sorted.map((_, i) => PALETTE[i % PALETTE.length]), borderRadius: 4 }],
+    },
+    options: opts,
+  });
 }
 
 // ============================================================
 // TAB SWITCHING
 // ============================================================
 function switchTab(viewId, tabElement) {
-  document
-    .querySelectorAll(".view-content")
-    .forEach((el) => (el.style.display = "none"));
+  document.querySelectorAll(".view-content").forEach(el => el.style.display = "none");
   const target = document.getElementById("view-" + viewId);
   if (target) target.style.display = "block";
-  document
-    .querySelectorAll(".nav-tab")
-    .forEach((el) => el.classList.remove("active"));
+  document.querySelectorAll(".nav-tab").forEach(el => el.classList.remove("active"));
   if (tabElement) tabElement.classList.add("active");
-
-  // Lazy-load server status when switching to that tab
-  if (viewId === "server-status") {
-    fetchServerStatus();
-  }
+  if (viewId === "server-status") fetchServerStatus();
 }
 
 // ============================================================
-// EXCEL EXPORTS (consolidated, no duplicates)
+// EXCEL EXPORTS
 // ============================================================
 function exportToExcel(dataArray, columns, sheetName, fileName) {
-  const exportData = dataArray.map((r) => {
+  const exportData = dataArray.map(r => {
     const row = {};
-    columns.forEach(([label, key]) => {
-      row[label] =
-        key === "__latestDate__"
-          ? fmtDate(r.latestDate)
-          : r[key] != null
-          ? r[key]
-          : "-";
-    });
+    columns.forEach(([label, key]) => { row[label] = key === "__latestDate__" ? fmtDate(r.latestDate) : (r[key] != null ? r[key] : "-"); });
     return row;
   });
   const ws = XLSX.utils.json_to_sheet(exportData);
@@ -751,20 +791,31 @@ function exportToExcel(dataArray, columns, sheetName, fileName) {
   XLSX.writeFile(wb, fileName);
 }
 
+function exportRiskReport() {
+  const data = computeExtensionRisk(state.filtered.length ? state.filtered : state.raw);
+  const exportData = data.map((e, i) => ({
+    Rank: i + 1, "Extension ID": e.id, "Extension Name": e.name,
+    "Total Findings": e.findings, "Unique Brands": e.uniqueBrands, "Unique Networks": e.uniqueNetworks, "Risk Score": e.score,
+  }));
+  const ws = XLSX.utils.json_to_sheet(exportData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Extension Risk");
+  XLSX.writeFile(wb, "extension_risk_report.xlsx");
+}
+
 // ============================================================
 // UPDATE DATA BUTTON
 // ============================================================
 function initUpdateBtn() {
-  const updateBtn = document.getElementById("updateDataBtn");
-  if (!updateBtn) return;
-  updateBtn.addEventListener("click", function () {
+  const btn = document.getElementById("updateDataBtn");
+  if (!btn) return;
+  btn.addEventListener("click", function () {
     const status = document.getElementById("updateStatus");
     if (status) status.textContent = "Updating...";
     fetch("http://localhost:5000/run-dashboard-bat", { method: "POST" })
-      .then((res) => res.json())
-      .then((data) => {
-        if (status)
-          status.textContent = data.success ? "Data updated!" : "Update failed.";
+      .then(r => r.json())
+      .then(data => {
+        if (status) status.textContent = data.success ? "Data updated!" : "Update failed.";
         setTimeout(() => { if (status) status.textContent = ""; }, 3000);
       })
       .catch(() => {
@@ -775,142 +826,71 @@ function initUpdateBtn() {
 }
 
 // ============================================================
-// DOMContentLoaded — single consolidated listener
+// DOMContentLoaded
 // ============================================================
 document.addEventListener("DOMContentLoaded", function () {
-  // Init update button
   initUpdateBtn();
-
-  // Load rack info, then fetch server status & VM adware
   loadRackInfo().then(() => {
     fetchVmWiseAdware();
-    // Server status auto-refresh every 60s
     fetchServerStatus();
     setInterval(fetchServerStatus, 60000);
   });
-
-  // Load main data
   loadMainData();
 
-  // Reports filter listeners (change for selects, input for text)
-  document.getElementById("extensionFilter")
-    ?.addEventListener("change", applyFilters);
-  document.getElementById("networkFilter")
-    ?.addEventListener("change", applyFilters);
-  document.getElementById("searchBox")
-    ?.addEventListener("input", applyFilters);
-  document.getElementById("extensionIdNameBox")
-    ?.addEventListener("input", applyFilters);
+  document.getElementById("extensionFilter")?.addEventListener("change", applyFilters);
+  document.getElementById("networkFilter")?.addEventListener("change", applyFilters);
+  document.getElementById("searchBox")?.addEventListener("input", applyFilters);
+  document.getElementById("extensionIdNameBox")?.addEventListener("input", applyFilters);
+  document.getElementById("brandSearchBox")?.addEventListener("input", applyBrandFilters);
+  document.getElementById("vmFilter")?.addEventListener("change", applyVmAdwareFilters);
+  document.getElementById("vmAdwareExtensionFilter")?.addEventListener("change", applyVmAdwareFilters);
+  document.getElementById("vmAdwareSearchBox")?.addEventListener("input", applyVmAdwareFilters);
 
-  // Brand filter listeners
-  document.getElementById("brandSearchBox")
-    ?.addEventListener("input", applyBrandFilters);
+  document.getElementById("downloadExcelBtn")?.addEventListener("click", () => {
+    exportToExcel(state.filtered.length ? state.filtered : state.raw, [
+      ["Incidence Id","incidenceId"],["Extension Id","extensionId"],["Extension Name","extensionName"],
+      ["Brand","keyword"],["Violation","voilationTypeFLP"],["Video File Path","videoFilePath"],
+      ["Screen Shot Path","screenShotPath"],["Network Log File Path","networkLogFilePath"],
+      ["Landing Url","landingUrl"],["Type","type"],["Landing Screenshot","landingScreenshot"],
+      ["Brand Url","brandUrl"],["Final Landing Url","finalLandingUrl"],
+      ["Redirection URL","redirectionURL"],["Redirection URL FLP","redirectionURLFLP"],
+      ["Networks","networks"],["Started Date","automationStart"],
+    ], "Records", "extension_records.xlsx");
+  });
 
-  // VM Adware listeners
-  document.getElementById("vmFilter")
-    ?.addEventListener("change", applyVmAdwareFilters);
-  document.getElementById("vmAdwareExtensionFilter")
-    ?.addEventListener("change", applyVmAdwareFilters);
-  document.getElementById("vmAdwareSearchBox")
-    ?.addEventListener("input", applyVmAdwareFilters);
+  document.getElementById("downloadRiskExcelBtn")?.addEventListener("click", exportRiskReport);
 
-  // ── EXCEL DOWNLOADS ────────────────────────────────────────
-
-  // Reports
-  document.getElementById("downloadExcelBtn")
-    ?.addEventListener("click", () => {
-      exportToExcel(
-        state.filtered.length ? state.filtered : state.raw,
-        [
-          ["Incidence Id", "incidenceId"],
-          ["Extension Id", "extensionId"],
-          ["Extension Name", "extensionName"],
-          ["Brand", "keyword"],
-          ["Violation", "voilationTypeFLP"],
-          ["Video File Path", "videoFilePath"],
-          ["Screen Shot Path", "screenShotPath"],
-          ["Network Log File Path", "networkLogFilePath"],
-          ["Landing Url", "landingUrl"],
-          ["Type", "type"],
-          ["Landing Screenshot", "landingScreenshot"],
-          ["Brand Url", "brandUrl"],
-          ["Final Landing Url", "finalLandingUrl"],
-          ["Redirection URL", "redirectionURL"],
-          ["Redirection URL FLP", "redirectionURLFLP"],
-          ["Networks", "networks"],
-          ["Started Date", "automationStart"],
-        ],
-        "Records",
-        "extension_records.xlsx"
-      );
-    });
-
-  // Brand summary
-  document.getElementById("downloadBrandExcelBtn")
-    ?.addEventListener("click", () => {
-      const data = state.filteredBrandData.length
-        ? state.filteredBrandData
-        : state.brandData;
-
-      // Check whether we're showing the detail table
-      const detailVisible =
-        document.getElementById("brandDetailsSection")?.style.display !== "none";
-
-      if (detailVisible && state.filteredBrandDetails.length) {
-        exportToExcel(
-          state.filteredBrandDetails,
-          [
-            ["Incidence Id", "incidenceId"],
-            ["Extension Id", "extensionId"],
-            ["Extension Name", "extensionName"],
-            ["Brand", "keyword"],
-            ["Violation", "voilationTypeFLP"],
-            ["Networks", "networks"],
-            ["Started Date", "automationStart"],
-            ["Video File Path", "videoFilePath"],
-            ["Network Log File Path", "networkLogFilePath"],
-          ],
-          "Brand Details",
-          "brand_findings_details.xlsx"
-        );
-      } else {
-        const ws = XLSX.utils.json_to_sheet(
-          data.map((b) => ({
-            Brand: b.brand,
-            "Total Findings": b.totalFindings,
-            "Unique Extensions": b.uniqueExtensions,
-            "Latest Finding": fmtDate(b.latestDate),
-          }))
-        );
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Brand Summary");
-        XLSX.writeFile(wb, "brand_summary.xlsx");
-      }
-    });
-
-  // VM Adware
-  document.getElementById("downloadVmAdwareExcelBtn")
-    ?.addEventListener("click", () => {
-      const dataToExport =
-        state.filteredVmAdwareData.length
-          ? state.filteredVmAdwareData
-          : state.vmAdwareData;
-
-      const exportData = dataToExport.map((r) => {
-        const vmName = r.vmName || "Unknown";
-        const loc = state.vmRackInfo[vmName.toLowerCase()] || "";
-        return {
-          "Extension ID": r.extensionId || "-",
-          "Extension Name": r.extensionName || "-",
-          "VM Name": vmName,
-          Location: loc,
-          Browser: r.browser || "-",
-          "Created Date": r.createddate || "-",
-        };
-      });
-      const ws = XLSX.utils.json_to_sheet(exportData);
+  document.getElementById("downloadBrandExcelBtn")?.addEventListener("click", () => {
+    const data = state.filteredBrandData.length ? state.filteredBrandData : state.brandData;
+    const detailVisible = document.getElementById("brandDetailsSection")?.style.display !== "none";
+    if (detailVisible && state.filteredBrandDetails.length) {
+      exportToExcel(state.filteredBrandDetails, [
+        ["Incidence Id","incidenceId"],["Extension Id","extensionId"],["Extension Name","extensionName"],
+        ["Brand","keyword"],["Violation","voilationTypeFLP"],["Networks","networks"],
+        ["Started Date","automationStart"],["Video File Path","videoFilePath"],["Network Log File Path","networkLogFilePath"],
+      ], "Brand Details", "brand_findings_details.xlsx");
+    } else {
+      const ws = XLSX.utils.json_to_sheet(data.map(b => ({
+        Brand: b.brand, "Total Findings": b.totalFindings, "Unique Extensions": b.uniqueExtensions,
+        "First Seen": b.firstSeen, "Latest Finding": fmtDate(b.latestDate),
+        "This Week": b.trend.thisWeek, "Last Week": b.trend.lastWeek, "Trend": b.trend.diff,
+      })));
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "VM Adware Data");
-      XLSX.writeFile(wb, "vm_adware_report.xlsx");
+      XLSX.utils.book_append_sheet(wb, ws, "Brand Summary");
+      XLSX.writeFile(wb, "brand_summary.xlsx");
+    }
+  });
+
+  document.getElementById("downloadVmAdwareExcelBtn")?.addEventListener("click", () => {
+    const toExport = state.filteredVmAdwareData.length ? state.filteredVmAdwareData : state.vmAdwareData;
+    const exportData = toExport.map(r => {
+      const vmName = r.vmName || "Unknown";
+      const loc = state.vmRackInfo[vmName.toLowerCase()] || "";
+      return { "Extension ID": r.extensionId || "-", "Extension Name": r.extensionName || "-", "VM Name": vmName, Location: loc, Browser: r.browser || "-", "Created Date": r.createddate || "-" };
     });
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "VM Adware Data");
+    XLSX.writeFile(wb, "vm_adware_report.xlsx");
+  });
 });
