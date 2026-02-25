@@ -59,76 +59,81 @@
       <div class="nav-tab" onclick="switchTab('vm-adware', this)">VM Wise Adware</div>
     </div>
 
-    <!-- Reports View (Default) -->
+    <!-- ═══════════════════════════════════════════════════
+         REPORTS VIEW (Default)
+    ═══════════════════════════════════════════════════ -->
     <div id="view-reports" class="view-content">
-    <div class="filters-section">
-      <h3>Filters</h3>
-      <div class="filters">
-        <div class="filter-group">
-          <label>Extension</label>
-          <select id="extensionFilter">
-            <option value="">All Extensions</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label>Extension ID/Name</label>
-          <input type="text" id="extensionIdNameBox" placeholder="Paste or type ID or Name">
-        </div>
-        <div class="filter-group">
-          <label>Network</label>
-          <select id="networkFilter">
-            <option value="">All Networks</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label>From Date</label>
-          <div class="input-with-clear">
-            <input type="text" id="fromDate" placeholder="Select date" readonly>
-            <span class="clear-icon" id="clearFromDate" title="Clear date">&#10006;</span>
+      <div class="filters-section">
+        <h3>Filters</h3>
+        <div class="filters">
+          <div class="filter-group">
+            <label>Extension</label>
+            <select id="extensionFilter">
+              <option value="">All Extensions</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Extension ID / Name</label>
+            <input type="text" id="extensionIdNameBox" placeholder="Paste or type ID or Name">
+          </div>
+          <div class="filter-group">
+            <label>Network</label>
+            <select id="networkFilter">
+              <option value="">All Networks</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>From Date</label>
+            <div class="input-with-clear">
+              <input type="text" id="fromDate" placeholder="Select date" readonly>
+              <span class="clear-icon" id="clearFromDate" title="Clear date">&#10006;</span>
+            </div>
+          </div>
+          <div class="filter-group">
+            <label>To Date</label>
+            <div class="input-with-clear">
+              <input type="text" id="toDate" placeholder="Select date" readonly>
+              <span class="clear-icon" id="clearToDate" title="Clear date">&#10006;</span>
+            </div>
+          </div>
+          <div class="filter-group">
+            <label>Search</label>
+            <input type="text" id="searchBox" placeholder="Brand, IncidentId, Network, Extension...">
           </div>
         </div>
-        <div class="filter-group">
-          <label>To Date</label>
-          <div class="input-with-clear">
-            <input type="text" id="toDate" placeholder="Select date" readonly>
-            <span class="clear-icon" id="clearToDate" title="Clear date">&#10006;</span>
-          </div>
+      </div>
+
+      <div class="table-section">
+        <h3>Records</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div id="reportsPagination" class="pagination-bar"></div>
+          <button id="downloadExcelBtn" class="excel-btn">⬇️ Download Excel</button>
         </div>
-        <div class="filter-group">
-          <label>Search</label>
-          <input type="text" id="searchBox" placeholder="Brand, IncidentId, Network...">
+        <div class="table-wrapper">
+          <table id="dataTable">
+            <thead>
+              <tr>
+                <th>Incident</th>
+                <th>Extension</th>
+                <th>Brand</th>
+                <th>Violation</th>
+                <th>Network</th>
+                <th>Video</th>
+                <th>Log</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
     </div>
 
-    <div class="table-section">
-      <h3>Records</h3>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <span></span>
-        <button id="downloadExcelBtn" class="excel-btn">⬇️ Download Excel</button>
-      </div>
-      <div class="table-wrapper">
-        <table id="dataTable">
-          <thead>
-            <tr>
-              <th>Incident</th>
-              <th>Extension</th>
-              <th>Brand</th>
-              <th>Violation</th>
-              <th>Network</th>
-              <th>Video</th>
-              <th>Log</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-    </div>
-
-    <!-- Brands View -->
+    <!-- ═══════════════════════════════════════════════════
+         BRANDS VIEW
+    ═══════════════════════════════════════════════════ -->
     <div id="view-brands" class="view-content" style="display:none;">
-      <!-- Brand Summary Cards -->
+
+      <!-- Brand Summary KPI Cards -->
       <div class="brand-summary-section">
         <h3>Brand Findings Summary</h3>
         <div class="brand-stats">
@@ -151,12 +156,6 @@
       <div class="filters-section">
         <h3>Filters</h3>
         <div class="filters">
-          <!-- <div class="filter-group">
-            <label>Select Brand</label>
-            <select id="brandFilter">
-              <option value="">All Brands</option>
-            </select>
-          </div> -->
           <div class="filter-group">
             <label>Search Brand</label>
             <input type="text" id="brandSearchBox" placeholder="Search brand name...">
@@ -178,11 +177,11 @@
         </div>
       </div>
 
-      <!-- Brand Listings Table -->
+      <!-- Brand Summary Table -->
       <div class="table-section">
         <h3 id="brandTableTitle">All Brands Overview</h3>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <span id="brandTableSubtitle"></span>
+          <span id="brandTableSubtitle" style="color:#b0b0b0;font-size:13px;"></span>
           <button id="downloadBrandExcelBtn" class="excel-btn">⬇️ Download Excel</button>
         </div>
         <div class="table-wrapper">
@@ -198,12 +197,45 @@
             <tbody></tbody>
           </table>
         </div>
+        <p class="hint-text">💡 Click a brand row to see its individual findings.</p>
+      </div>
+
+      <!-- Brand Detail Section (shown on row click) -->
+      <div id="brandDetailsSection" class="table-section" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <div>
+            <h3>Brand Details</h3>
+            <p id="brandDetailInfo" style="color:#b0b0b0;font-size:13px;margin-top:4px;"></p>
+          </div>
+          <button class="back-btn" onclick="closeBrandDetails()">← Back to All Brands</button>
+        </div>
+        <div class="table-wrapper">
+          <table id="brandDetailsTable">
+            <thead>
+              <tr>
+                <th>Incident</th>
+                <th>Extension</th>
+                <th>Violation</th>
+                <th>Network</th>
+                <th>Video</th>
+                <th>Log</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-    <!-- Server Status View -->
+    <!-- ═══════════════════════════════════════════════════
+         SERVER STATUS VIEW
+    ═══════════════════════════════════════════════════ -->
     <div id="view-server-status" class="view-content" style="display:none;">
       <div class="server-status-section">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <h3 style="color:#64ffda;font-size:18px;margin:0;">Server Status</h3>
+          <span id="serverStatusTimestamp" style="color:#666;font-size:13px;">—</span>
+        </div>
         <div class="server-status-block">
           <h3>Busy Servers</h3>
           <div id="busyServerStatus" class="server-status-list">Loading...</div>
@@ -212,51 +244,55 @@
           <h3>Free Servers</h3>
           <div id="freeServerStatus" class="server-status-list">Loading...</div>
         </div>
+        <p style="color:#666;font-size:12px;margin-top:16px;">Auto-refreshes every 60 seconds.</p>
       </div>
     </div>
 
-    <!-- VM Wise Adware View -->
+    <!-- ═══════════════════════════════════════════════════
+         VM WISE ADWARE VIEW
+    ═══════════════════════════════════════════════════ -->
     <div id="view-vm-adware" class="view-content" style="display:none;">
-    <div class="table-section">
-      <h3>VM Wise Adware</h3>
-      <div class="filters" style="margin-bottom: 20px;">
-        <div class="filter-group">
-          <label>Select Server (VM)</label>
-          <select id="vmFilter">
-            <option value="">All VMs</option>
-          </select>
+      <div class="table-section">
+        <h3>VM Wise Adware</h3>
+        <div class="filters" style="margin-bottom:20px;">
+          <div class="filter-group">
+            <label>Select Server (VM)</label>
+            <select id="vmFilter">
+              <option value="">All VMs</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Extension Name</label>
+            <select id="vmAdwareExtensionFilter">
+              <option value="">All Extensions</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Extension ID / Name Search</label>
+            <input type="text" id="vmAdwareSearchBox" placeholder="Paste or type ID or Name">
+          </div>
         </div>
-        <div class="filter-group">
-          <label>Extension Name</label>
-          <select id="vmAdwareExtensionFilter">
-            <option value="">All Extensions</option>
-          </select>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <span></span>
+          <button id="downloadVmAdwareExcelBtn" class="excel-btn">⬇️ Download Excel</button>
         </div>
-        <div class="filter-group">
-          <label>Extension ID/Name Search</label>
-          <input type="text" id="vmAdwareSearchBox" placeholder="Paste or type ID or Name">
+        <div class="table-wrapper">
+          <table id="vmAdwareTable">
+            <thead>
+              <tr>
+                <th>Extension ID</th>
+                <th>Extension Name</th>
+                <th>Browser</th>
+                <th>Created Date</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <span></span>
-        <button id="downloadVmAdwareExcelBtn" class="excel-btn">⬇️ Download Excel</button>
-      </div>
-      <div class="table-wrapper">
-        <table id="vmAdwareTable">
-          <thead>
-            <tr>
-              <th>Extension ID</th>
-              <th>Extension Name</th>
-              <th>Browser</th>
-              <th>Created Date</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
       </div>
     </div>
-    </div>
-  </div>
+
+  </div><!-- /.main-content -->
 
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
