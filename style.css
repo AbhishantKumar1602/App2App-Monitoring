@@ -482,3 +482,65 @@ td a:hover {
   border-color: transparent;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
 }
+
+/* Badge styling for brand findings */
+.badge {
+  background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+  color: #0f0f23;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 14px;
+  display: inline-block;
+}
+
+
+/* Brand Summary Section */
+.brand-summary-section {
+  background: #1a1a2e;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.brand-summary-section h3 {
+  color: #64ffda;
+  margin-bottom: 20px;
+  font-size: 18px;
+}
+
+.brand-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+}
+
+.stat-card {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border: 1px solid rgba(100, 255, 218, 0.2);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-3px);
+  border-color: #64ffda;
+  box-shadow: 0 4px 15px rgba(100, 255, 218, 0.1);
+}
+
+.stat-value {
+  font-size: 32px;
+  font-weight: bold;
+  color: #64ffda;
+  margin-bottom: 8px;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: #b0b0b0;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}

@@ -47,6 +47,7 @@
     <!-- Navigation Boxes -->
     <div class="nav-tabs">
       <div class="nav-tab active" onclick="switchTab('reports', this)">Reports</div>
+      <div class="nav-tab" onclick="switchTab('brands', this)">Brands</div>
       <div class="nav-tab" onclick="switchTab('server-status', this)">Server Status</div>
       <div class="nav-tab" onclick="switchTab('vm-adware', this)">VM Wise Adware</div>
     </div>
@@ -116,6 +117,81 @@
         </table>
       </div>
     </div>
+    </div>
+
+    <!-- Brands View -->
+    <div id="view-brands" class="view-content" style="display:none;">
+      <!-- Brand Summary Cards -->
+      <div class="brand-summary-section">
+        <h3>Brand Findings Summary</h3>
+        <div class="brand-stats">
+          <div class="stat-card">
+            <div class="stat-value" id="totalBrands">0</div>
+            <div class="stat-label">Total Brands</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="totalBrandFindings">0</div>
+            <div class="stat-label">Total Findings</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="avgFindingsPerBrand">0</div>
+            <div class="stat-label">Avg per Brand</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Brand Filters -->
+      <div class="filters-section">
+        <h3>Filters</h3>
+        <div class="filters">
+          <div class="filter-group">
+            <label>Select Brand</label>
+            <select id="brandFilter">
+              <option value="">All Brands</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Search Brand</label>
+            <input type="text" id="brandSearchBox" placeholder="Search brand name...">
+          </div>
+          <div class="filter-group">
+            <label>From Date</label>
+            <div class="input-with-clear">
+              <input type="text" id="brandFromDate" placeholder="Select date" readonly>
+              <span class="clear-icon" id="clearBrandFromDate" title="Clear date">&#10006;</span>
+            </div>
+          </div>
+          <div class="filter-group">
+            <label>To Date</label>
+            <div class="input-with-clear">
+              <input type="text" id="brandToDate" placeholder="Select date" readonly>
+              <span class="clear-icon" id="clearBrandToDate" title="Clear date">&#10006;</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Brand Listings Table -->
+      <div class="table-section">
+        <h3 id="brandTableTitle">All Brands Overview</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <span id="brandTableSubtitle"></span>
+          <button id="downloadBrandExcelBtn" class="excel-btn">⬇️ Download Excel</button>
+        </div>
+        <div class="table-wrapper">
+          <table id="brandTable">
+            <thead>
+              <tr id="brandTableHeader">
+                <th>Brand</th>
+                <th>Total Findings</th>
+                <th>Unique Extensions</th>
+                <th>Latest Finding</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- Server Status View -->
