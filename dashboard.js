@@ -10,30 +10,94 @@ const state = {
   vmAdwareData: [],
   filteredVmAdwareData: [],
   vmRackInfo: {},
+  // Pre-built lookup indices for O(1) filtering
+  indices: {
+    byExtName: new Map(),
+    byNetwork:  new Map(),
+    byType:     new Map(),
+    byPub:      new Map(),
+    byCoupon:   new Map(),
+  },
 };
 
 // Chart instances — destroyed & rebuilt on data change
 const charts = {
   timeline: null,
-  topBrands: null,
-  violations: null,
-  vmAdware: null,
-  extensionRisk: null,
-  networkDist: null,
-  brandNetwork: null,
   typeChart: null,
   networkBrand: null,
+  networkDist: null,
+  brandNetwork: null,
   brandViolation: null,
   brandTimeline: null,
-  vmBrowser: null,
-  vmTimeline: null,
-  sessionDuration: null,
-  publisherChart: null,
-  couponSiteChart: null,
+  hourChart: null,
+  serverChart: null,
+  durationChart: null,
 };
 
 // Server utilization history for sparkline
 const utilHistory = [];
+
+// ── Loading progress bar ──────────────────────────────────────
+function setLoadProgress(pct, label) {
+  const bar  = document.getElementById("loadProgressBar");
+  const wrap = document.getElementById("loadProgressWrap");
+  const txt  = document.getElementById("loadProgressText");
+  if (!bar || !wrap) return;
+  wrap.style.display = pct >= 100 ? "none" : "flex";
+  bar.style.width = Math.min(pct, 100) + "%";
+  if (txt) txt.textContent = label || "";
+}
+
+// ── Index builder (called once after raw data ready) ─────────
+function buildIndices(data) {
+  const idx = state.indices;
+  idx.byExtName.clear(); idx.byNetwork.clear();
+  idx.byType.clear(); idx.byPub.clear(); idx.byCoupon.clear();
+
+  data.forEach((r, i) => {
+    // extensionName
+    if (r.extensionName) {
+      if (!idx.byExtName.has(r.extensionName)) idx.byExtName.set(r.extensionName, []);
+      idx.byExtName.get(r.extensionName).push(i);
+    }
+    // networks (comma-separated)
+    r.networks.split(",").forEach(n => {
+      const net = n.trim();
+      if (!net) return;
+      if (!idx.byNetwork.has(net)) idx.byNetwork.set(net, []);
+      idx.byNetwork.get(net).push(i);
+    });
+    // type
+    if (r.type) {
+      if (!idx.byType.has(r.type)) idx.byType.set(r.type, []);
+      idx.byType.get(r.type).push(i);
+    }
+    // pubValue
+    if (r.pubValue) {
+      if (!idx.byPub.has(r.pubValue)) idx.byPub.set(r.pubValue, []);
+      idx.byPub.get(r.pubValue).push(i);
+    }
+    // couponSite
+    if (r.couponSite) {
+      if (!idx.byCoupon.has(r.couponSite)) idx.byCoupon.set(r.couponSite, []);
+      idx.byCoupon.get(r.couponSite).push(i);
+    }
+  });
+}
+
+// ── Set-intersection helper ──────────────────────────────────
+function indexLookup(map, key) {
+  return map.has(key) ? new Set(map.get(key)) : null; // null means "not found"
+}
+
+function intersectSets(a, b) {
+  if (a === "ALL") return b;
+  if (b === "ALL") return a;
+  const result = new Set();
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  small.forEach(v => { if (large.has(v)) result.add(v); });
+  return result;
+}
 
 // Matrix click-to-filter state
 let matrixFilter = { brand: null, network: null };
@@ -146,35 +210,7 @@ function fetchServerStatus() {
       if (busyCount) busyCount.textContent = `(${busy.length})`;
       if (freeCount) freeCount.textContent = `(${free.length})`;
 
-      // Color-coded utilization bar
-      const utilEl = document.getElementById("serverUtilSummary");
-      if (utilEl && list.length > 0) {
-        const pct = Math.round((busy.length / list.length) * 100);
-        const color = pct >= 80 ? "#ff4b5c" : pct >= 50 ? "#ffd700" : "#43e97b";
-        const label = pct >= 80 ? "🔴 High Load" : pct >= 50 ? "🟡 Moderate" : "🟢 Low Load";
-        utilEl.innerHTML = `
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <span style="color:${color};font-weight:bold;font-size:14px;">${label}</span>
-            <span class="util-label">${busy.length} / ${list.length} VMs busy (${pct}%)</span>
-          </div>
-          <div class="util-bar-wrap"><div class="util-bar" style="width:${pct}%;background:${color};border-radius:6px;height:100%;transition:width 0.6s ease;"></div></div>`;
-
-        // Session history sparkline
-        utilHistory.push(pct);
-        if (utilHistory.length > 10) utilHistory.shift();
-        const historyEl = document.getElementById("serverUtilHistory");
-        const sparkline = document.getElementById("utilSparkline");
-        if (historyEl && utilHistory.length > 1) {
-          historyEl.style.display = "";
-          if (sparkline) {
-            sparkline.innerHTML = utilHistory.map(v => {
-              const c = v >= 80 ? "#ff4b5c" : v >= 50 ? "#ffd700" : "#43e97b";
-              const h = Math.max(4, Math.round(v * 0.3));
-              return `<div class="spark-bar" style="height:${h}px;background:${c};" title="${v}%"></div>`;
-            }).join("");
-          }
-        }
-      }
+      // utilization summary removed
     })
     .catch(() => {
       ["busyServerStatus","freeServerStatus"].forEach(id => {
@@ -196,57 +232,98 @@ function sessionDurationMins(start, end) {
 
 function loadMainData() {
   setTableMessage("#dataTable tbody", "Loading...", 6);
+  setLoadProgress(5, "Fetching data…");
+
   fetch("data.json?t=" + Date.now())
-    .then(r => r.json())
+    .then(r => { setLoadProgress(20, "Parsing JSON…"); return r.json(); })
     .then(data => {
-      state.raw = data
-        .filter(r => r && typeof r === "object")
-        .map(r => {
-          const dur = sessionDurationMins(r.automationStart, r.automationEnd);
-          return {
-            ...r,
-            extensionId:        r.extensionId        || "",
-            extensionName:      r.extensionName      || "",
-            keyword:            normalizeBrand(r.keyword),
-            networks:           r.networks            || "",
-            voilationTypeFLP:   r.voilationTypeFLP    || "",
-            automationStart:    r.automationStart     || "",
-            automationEnd:      r.automationEnd       || "",
-            sessionDurMins:     dur,
-            incidenceId:        r.incidenceId         || "",
-            videoFilePath:      r.videoFilePath       || "",
-            networkLogFilePath: r.networkLogFilePath  || "",
-            type:               r.type                || "",
-            landingUrl:         r.landingUrl          || "",
-            finalLandingUrl:    r.finalLandingUrl     || "",
-            redirectionURL:     r.redirectionURL      || "",
-            redirectionURLFLP:  r.redirectionURLFLP   || "",
-            redirectionURL2:    r.redirectionURL2     || "",
-            redirectionURL2FLP: r.redirectionURL2FLP  || "",
-            brandUrl:           r.brandUrl            || "",
-            screenShotPath:     r.screenShotPath      || "",
-            landingScreenshot:  r.landingScreenshot   || "",
-            couponSite:         r.couponSite          || "",
-            pubName:            r.pubName             || "",
-            pubValue:           r.pubValue            || "",
-            advName:            r.advName             || "",
-            advValue:           r.advValue            || "",
-            vm:                 r.vm                  || "",
-          };
+      setLoadProgress(35, "Normalising records…");
+
+      // ── Step 1: normalise (sync, fast) ─────────────────────
+      const raw = [];
+      const validData = data.filter(r => r && typeof r === "object");
+      validData.forEach(r => {
+        const dur = sessionDurationMins(r.automationStart, r.automationEnd);
+        // extract hour for heatmap
+        const hourMatch = r.automationStart ? r.automationStart.match(/T(\d{2}):/) : null;
+        raw.push({
+          extensionId:        r.extensionId        || "",
+          extensionName:      r.extensionName      || "",
+          keyword:            normalizeBrand(r.keyword),
+          networks:           r.networks            || "",
+          voilationTypeFLP:   r.voilationTypeFLP    || "",
+          automationStart:    r.automationStart     || "",
+          automationEnd:      r.automationEnd       || "",
+          sessionDurMins:     dur,
+          hour:               hourMatch ? parseInt(hourMatch[1], 10) : null,
+          incidenceId:        r.incidenceId         || "",
+          videoFilePath:      r.videoFilePath       || "",
+          networkLogFilePath: r.networkLogFilePath  || "",
+          type:               r.type                || "",
+          landingUrl:         r.landingUrl          || "",
+          finalLandingUrl:    r.finalLandingUrl     || "",
+          redirectionURL:     r.redirectionURL      || "",
+          redirectionURLFLP:  r.redirectionURLFLP   || "",
+          redirectionURL2:    r.redirectionURL2     || "",
+          redirectionURL2FLP: r.redirectionURL2FLP  || "",
+          brandUrl:           r.brandUrl            || "",
+          screenShotPath:     r.screenShotPath      || "",
+          landingScreenshot:  r.landingScreenshot   || "",
+          couponSite:         r.couponSite          || "",
+          pubName:            r.pubName             || "",
+          pubValue:           r.pubValue            || "",
+          advName:            r.advName             || "",
+          advValue:           r.advValue            || "",
+          vm:                 r.vm                  || "",
+          serverName:         r.serverName          || "",
         });
-      state.raw.sort((a, b) => (parseDate(b.automationStart) || 0) - (parseDate(a.automationStart) || 0));
-      fillSelect("extensionFilter", state.raw.map(d => d.extensionName), "All Extensions");
-      fillSelect("networkFilter", state.raw.flatMap(d => d.networks ? d.networks.split(",").map(n => n.trim()) : []), "All Networks");
-      fillSelect("typeFilter", state.raw.map(d => d.type).filter(Boolean), "All Types");
-      fillSelect("pubFilter", state.raw.map(d => d.pubValue).filter(Boolean), "All Publishers");
-      fillSelect("couponSiteFilter", state.raw.map(d => d.couponSite).filter(Boolean), "All Coupon Sites");
-      initializeDatePickers();
-      applyFilters();
-      initializeBrandData(state.raw);
+      });
+
+      // ── Step 2: sort (sync) ─────────────────────────────────
+      raw.sort((a, b) => (a.automationStart < b.automationStart ? 1 : a.automationStart > b.automationStart ? -1 : 0));
+      state.raw = raw;
+
+      setLoadProgress(55, "Building filter indices…");
+
+      // ── Step 3: indices + selects (yield to browser first) ─
+      setTimeout(() => {
+        buildIndices(raw);
+
+        // Build select lists from single-pass Maps
+        const extNames = [], netNames = [], typeNames = [], pubNames = [], couponNames = [];
+        const extSeen = new Set(), netSeen = new Set(), typeSeen = new Set(), pubSeen = new Set(), couponSeen = new Set();
+        raw.forEach(d => {
+          if (d.extensionName && !extSeen.has(d.extensionName)) { extSeen.add(d.extensionName); extNames.push(d.extensionName); }
+          d.networks.split(",").forEach(n => { const t = n.trim(); if (t && !netSeen.has(t)) { netSeen.add(t); netNames.push(t); } });
+          if (d.type && !typeSeen.has(d.type)) { typeSeen.add(d.type); typeNames.push(d.type); }
+          if (d.pubValue && !pubSeen.has(d.pubValue)) { pubSeen.add(d.pubValue); pubNames.push(d.pubValue); }
+          if (d.couponSite && !couponSeen.has(d.couponSite)) { couponSeen.add(d.couponSite); couponNames.push(d.couponSite); }
+        });
+
+        fillSelect("extensionFilter", extNames, "All Extensions");
+        fillSelect("networkFilter",   netNames, "All Networks");
+        fillSelect("typeFilter",      typeNames, "All Types");
+        fillSelect("pubFilter",       pubNames, "All Publishers");
+        fillSelect("couponSiteFilter",couponNames, "All Coupon Sites");
+        initializeDatePickers();
+
+        setLoadProgress(70, "Rendering table…");
+
+        // ── Step 4: render table immediately, charts after ───
+        setTimeout(() => {
+          applyFilters();
+          setLoadProgress(85, "Building charts…");
+          setTimeout(() => {
+            initializeBrandData(raw);
+            setLoadProgress(100, "Done");
+          }, 50);
+        }, 0);
+      }, 0);
     })
     .catch(err => {
       console.error("Error loading data:", err);
       setTableMessage("#dataTable tbody", "Failed to load data.", 6);
+      setLoadProgress(100);
     });
 }
 
@@ -265,48 +342,66 @@ function initializeDatePickers() {
 }
 
 // ============================================================
-// REPORTS FILTER
+// REPORTS FILTER — indexed, O(1) for select-based filters
 // ============================================================
 function applyFilters() {
-  const ext = document.getElementById("extensionFilter")?.value || "";
-  const extIdName = (document.getElementById("extensionIdNameBox")?.value || "").trim().toLowerCase();
-  const network = document.getElementById("networkFilter")?.value || "";
-  const typeVal = document.getElementById("typeFilter")?.value || "";
-  const pubVal = document.getElementById("pubFilter")?.value || "";
-  const couponVal = document.getElementById("couponSiteFilter")?.value || "";
-  const from = document.getElementById("fromDate")?.value || "";
-  const to = document.getElementById("toDate")?.value || "";
-  const search = (document.getElementById("searchBox")?.value || "").toLowerCase();
+  const ext      = document.getElementById("extensionFilter")?.value  || "";
+  const extIdName= (document.getElementById("extensionIdNameBox")?.value || "").trim().toLowerCase();
+  const network  = document.getElementById("networkFilter")?.value    || "";
+  const typeVal  = document.getElementById("typeFilter")?.value       || "";
+  const pubVal   = document.getElementById("pubFilter")?.value        || "";
+  const couponVal= document.getElementById("couponSiteFilter")?.value || "";
+  const from     = document.getElementById("fromDate")?.value         || "";
+  const to       = document.getElementById("toDate")?.value           || "";
+  const search   = (document.getElementById("searchBox")?.value || "").toLowerCase();
 
-  let filtered = state.raw;
-  if (ext) filtered = filtered.filter(d => d.extensionName === ext || d.extensionId === ext);
-  if (extIdName) filtered = filtered.filter(d => d.extensionName.toLowerCase().includes(extIdName) || d.extensionId.toLowerCase().includes(extIdName));
-  if (network) filtered = filtered.filter(d => d.networks.split(",").map(n => n.trim()).includes(network));
-  if (typeVal) filtered = filtered.filter(d => d.type === typeVal);
-  if (pubVal) filtered = filtered.filter(d => d.pubValue === pubVal);
-  if (couponVal) filtered = filtered.filter(d => d.couponSite === couponVal);
-  if (from) filtered = filtered.filter(d => d.automationStart >= from);
-  if (to) filtered = filtered.filter(d => d.automationStart <= to + "T23:59:59");
-  if (search) filtered = filtered.filter(d =>
-    d.keyword.toLowerCase().includes(search) ||
-    d.voilationTypeFLP.toLowerCase().includes(search) ||
-    d.networks.toLowerCase().includes(search) ||
-    d.incidenceId.toString().includes(search) ||
-    d.extensionName.toLowerCase().includes(search) ||
-    d.type.toLowerCase().includes(search) ||
-    d.pubValue.toLowerCase().includes(search) ||
-    d.couponSite.toLowerCase().includes(search)
-  );
+  const idx = state.indices;
+  let candidateSet = "ALL"; // "ALL" = no index filter yet
 
-  state.filtered = filtered;
-  // Apply matrix click filter last
-  if (matrixFilter.brand && matrixFilter.network) {
-    filtered = filtered.filter(d => d.keyword === matrixFilter.brand && d.networks.split(",").map(n=>n.trim()).includes(matrixFilter.network));
+  if (ext)       candidateSet = intersectSets(candidateSet, indexLookup(idx.byExtName, ext)       || new Set());
+  if (network)   candidateSet = intersectSets(candidateSet, indexLookup(idx.byNetwork,  network)  || new Set());
+  if (typeVal)   candidateSet = intersectSets(candidateSet, indexLookup(idx.byType,     typeVal)  || new Set());
+  if (pubVal)    candidateSet = intersectSets(candidateSet, indexLookup(idx.byPub,      pubVal)   || new Set());
+  if (couponVal) candidateSet = intersectSets(candidateSet, indexLookup(idx.byCoupon,   couponVal)|| new Set());
+
+  let filtered;
+  if (candidateSet === "ALL") {
+    filtered = state.raw;
+  } else {
+    filtered = [];
+    candidateSet.forEach(i => { if (state.raw[i]) filtered.push(state.raw[i]); });
+    filtered.sort((a, b) => (a.automationStart < b.automationStart ? 1 : a.automationStart > b.automationStart ? -1 : 0));
   }
+
+  if (extIdName) filtered = filtered.filter(d =>
+    d.extensionName.toLowerCase().includes(extIdName) ||
+    d.extensionId.toLowerCase().includes(extIdName));
+  if (from) filtered = filtered.filter(d => d.automationStart >= from);
+  if (to)   filtered = filtered.filter(d => d.automationStart <= to + "T23:59:59");
+  if (search) {
+    const s = search;
+    filtered = filtered.filter(d =>
+      d.keyword.toLowerCase().includes(s) ||
+      d.voilationTypeFLP.toLowerCase().includes(s) ||
+      d.networks.toLowerCase().includes(s) ||
+      String(d.incidenceId).includes(s) ||
+      d.extensionName.toLowerCase().includes(s) ||
+      d.type.toLowerCase().includes(s) ||
+      d.pubValue.toLowerCase().includes(s) ||
+      d.couponSite.toLowerCase().includes(s) ||
+      d.serverName.toLowerCase().includes(s));
+  }
+
+  if (matrixFilter.brand && matrixFilter.network) {
+    filtered = filtered.filter(d =>
+      d.keyword === matrixFilter.brand &&
+      d.networks.split(",").map(n => n.trim()).includes(matrixFilter.network));
+  }
+
   state.filtered = filtered;
   currentPage = 1;
   updateDashboard(filtered);
-  renderAnalyticsCharts(filtered);
+  requestAnimationFrame(() => renderAnalyticsCharts(filtered));
 }
 
 // ============================================================
@@ -318,61 +413,33 @@ function updateDashboard(data) {
   document.getElementById("uniqueBrands").textContent = new Set(data.map(d => d.keyword.toLowerCase())).size;
   document.getElementById("latestDate").textContent = data.length ? fmtDate(data[0].automationStart) : "-";
 
-  // Unique publishers (injected pub IDs)
-  const uniquePubs = new Set(data.map(d => d.pubValue).filter(Boolean));
-  const kpiPubs = document.getElementById("kpiUniquePubs");
-  if (kpiPubs) kpiPubs.textContent = uniquePubs.size;
-  // Top coupon site
-  const couponCounts = {};
-  data.forEach(d => { if (d.couponSite) couponCounts[d.couponSite] = (couponCounts[d.couponSite] || 0) + 1; });
-  const topCoupon = Object.entries(couponCounts).sort((a,b)=>b[1]-a[1])[0];
-  const kpiCoupon = document.getElementById("kpiTopCoupon");
-  if (kpiCoupon) kpiCoupon.innerHTML = topCoupon
-    ? `<span style="color:rgba(255,255,255,0.7);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(new URL(topCoupon[0]).hostname.replace('www.',''))}: ${topCoupon[1]}</span>`
-    : "";
-
-  // Week-over-week for total records
-  const now = new Date();
-  const thisWeekStart = new Date(now); const dow = now.getDay();
-  thisWeekStart.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1)); thisWeekStart.setHours(0,0,0,0);
-  const lastWeekStart = new Date(thisWeekStart); lastWeekStart.setDate(thisWeekStart.getDate() - 7);
-  let thisWk = 0, lastWk = 0;
-  data.forEach(d => {
-    const dt = parseDate(d.automationStart);
-    if (!dt) return;
-    if (dt >= thisWeekStart) thisWk++;
-    else if (dt >= lastWeekStart) lastWk++;
-  });
-  const wkEl = document.getElementById("kpiWeekVsLast");
-  if (wkEl) {
-    const diff = thisWk - lastWk;
-    wkEl.innerHTML = diff > 0 ? `<span class="kpi-sub-up">↑ +${diff} vs last wk</span>` : diff < 0 ? `<span class="kpi-sub-down">↓ ${diff} vs last wk</span>` : `<span class="kpi-sub-flat">→ same as last wk</span>`;
-  }
-  const twEl = document.getElementById("kpiThisWeek");
-  if (twEl) twEl.innerHTML = `<span style="color:rgba(255,255,255,0.7);font-size:11px;">This week: ${thisWk}</span>`;
-
-  // New extensions this week
-  const newExtIds = new Set(); const allExtIds = new Set();
-  data.forEach(d => {
-    allExtIds.add(d.extensionId);
-    const dt = parseDate(d.automationStart);
-    if (dt && dt >= thisWeekStart) newExtIds.add(d.extensionId);
-  });
-  const newExtSub = document.getElementById("kpiNewExtensions");
-  if (newExtSub) newExtSub.innerHTML = `<span style="color:rgba(255,255,255,0.7);font-size:11px;">${newExtIds.size} active this wk</span>`;
-
-  // Active networks count
-  const allNets = new Set();
-  data.forEach(d => { if (d.networks) d.networks.split(",").forEach(n => { if (n.trim()) allNets.add(n.trim()); }); });
-  const netCounts = {};
-  data.forEach(d => { if (d.networks) d.networks.split(",").forEach(n => { const t = n.trim(); if (t) netCounts[t] = (netCounts[t] || 0) + 1; }); });
-  const topNet = Object.entries(netCounts).sort((a,b)=>b[1]-a[1])[0];
+  // KPIs for networks and others
+  const networks = new Set(data.flatMap(d => (d.networks || "").split(",").map(n => n.trim()).filter(Boolean)));
   const kpiNets = document.getElementById("kpiActiveNetworksCount");
-  if (kpiNets) kpiNets.textContent = allNets.size;
+  if (kpiNets) kpiNets.textContent = networks.size;
+
+  const netCounts = {};
+  data.forEach(d => { (d.networks || "").split(",").forEach(n => { const net = n.trim(); if (net) netCounts[net] = (netCounts[net] || 0) + 1; }); });
+  const topNet = Object.entries(netCounts).sort((a,b) => b[1] - a[1])[0];
   const kpiTopNet = document.getElementById("kpiTopNetwork");
-  if (kpiTopNet) kpiTopNet.innerHTML = topNet ? `<span style="color:rgba(255,255,255,0.7);font-size:11px;">Top: ${esc(topNet[0])}</span>` : "";
-  const kpiNetSub = document.getElementById("kpiActiveNetworks");
-  if (kpiNetSub) kpiNetSub.innerHTML = `<span style="color:rgba(255,255,255,0.7);font-size:11px;">${allNets.size} networks</span>`;
+  if (kpiTopNet) kpiTopNet.textContent = topNet ? `${topNet[0]} (${topNet[1]})` : "—";
+
+  const pubs = new Set(data.map(d => d.pubValue).filter(Boolean));
+  const kpiPubs = document.getElementById("kpiUniquePubs");
+  if (kpiPubs) kpiPubs.textContent = pubs.size;
+
+  const couponCounts = {};
+  data.forEach(d => { if (d.couponSite) { try { const h = new URL(d.couponSite).hostname.replace("www.",""); couponCounts[h] = (couponCounts[h] || 0) + 1; } catch(e) {} } });
+  const topCoupon = Object.entries(couponCounts).sort((a,b) => b[1] - a[1])[0];
+  const kpiTopCoupon = document.getElementById("kpiTopCoupon");
+  if (kpiTopCoupon) kpiTopCoupon.textContent = topCoupon ? `${topCoupon[0]} (${topCoupon[1]})` : "—";
+
+  // Fingerprint suspected (multi-extension publishers)
+  const pubToExts = {};
+  data.forEach(d => { if (d.pubValue) { if (!pubToExts[d.pubValue]) pubToExts[d.pubValue] = new Set(); pubToExts[d.pubValue].add(d.extensionId); } });
+  const suspected = Object.values(pubToExts).filter(s => s.size > 1).length;
+  const kpiFinger = document.getElementById("kpiFingerprintSuspect");
+  if (kpiFinger) kpiFinger.textContent = suspected;
 
   // High-risk extension count
   const riskData = computeExtensionRisk(data);
@@ -390,6 +457,19 @@ function updateDashboard(data) {
   const swapPct = data.length > 0 ? ((swaps.length / data.length) * 100).toFixed(1) : 0;
   const kpiSwapPct = document.getElementById("kpiSwapPct");
   if (kpiSwapPct) kpiSwapPct.innerHTML = `<span style="color:rgba(255,255,255,0.7);font-size:11px;">${swapPct}% of records</span>`;
+
+  // Restore week-over-week calculations for anomaly detection
+  const now = new Date();
+  const thisWeekStart = new Date(now); const dow = now.getDay();
+  thisWeekStart.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1)); thisWeekStart.setHours(0,0,0,0);
+  const lastWeekStart = new Date(thisWeekStart); lastWeekStart.setDate(thisWeekStart.getDate() - 7);
+  let thisWk = 0, lastWk = 0;
+  data.forEach(d => {
+    const dt = parseDate(d.automationStart);
+    if (!dt) return;
+    if (dt >= thisWeekStart) thisWk++;
+    else if (dt >= lastWeekStart) lastWk++;
+  });
 
   // Anomaly detection — spike if today > 2x 7-day avg
   detectAndShowAnomaly(data, thisWk, lastWk);
@@ -564,20 +644,209 @@ function changePage(dir) {
 
 function renderAnalyticsCharts(data) {
   renderTimelineChart(data);
-  renderViolationDonut(data);
-  renderNetworkDistChart(data);
   renderTypeChart(data);
-  renderSessionDurationChart(data);
-  renderPublisherChart(data);
-  renderCouponSiteChart(data);
-  renderExtensionRiskTable(data);
-  renderNetworkBrandMatrix(data);
-  renderPublisherIntelTable(data);
-  renderAdvertiserTable(data);
-  renderCouponSiteTable(data);
-  renderAffiliateSwapTable(data);
-  renderAffiliateFingerprintTable(data);
+  renderNetworkDistChart(data);
+  // Stagger heavy renders to keep UI responsive
+  setTimeout(() => {
+    renderExtensionRiskTable(data);
+    renderNetworkBrandMatrix(data);
+    renderPublisherIntelTable(data);
+    renderAffiliateSwapTable(data);
+    // New analytics
+    renderHourHeatmap(data);
+    renderServerDistChart(data);
+    renderDurationChart(data);
+    renderQuickIntelStats(data);
+  }, 0);
 }
+
+// ── NEW: Hour-of-Day Activity Heatmap ────────────────────────
+function renderHourHeatmap(data) {
+  destroyChart("hourChart");
+  const ctx = document.getElementById("hourChart");
+  if (!ctx) return;
+
+  const counts = new Array(24).fill(0);
+  data.forEach(r => { if (r.hour !== null) counts[r.hour]++; });
+  const labels = Array.from({length: 24}, (_, i) => `${String(i).padStart(2,"0")}:00`);
+  const maxVal = Math.max(...counts, 1);
+  const colors = counts.map(v => {
+    const t = v / maxVal;
+    // dark blue → hot orange
+    const r = Math.round(102 + (255 - 102) * t);
+    const g = Math.round(126 + (107 - 126) * t);
+    const b = Math.round(234 + (107 - 234) * t);
+    return `rgba(${r},${g},${b},0.8)`;
+  });
+
+  const opts = baseOpts();
+  opts.plugins.legend.display = false;
+  opts.scales.x.ticks.maxRotation = 45;
+  opts.plugins.tooltip = {
+    backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0",
+    borderColor: "#2a2a40", borderWidth: 1,
+    callbacks: { label: c => ` ${c.parsed.y} findings at ${labels[c.parsed.x]}` }
+  };
+
+  charts.hourChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Findings",
+        data: counts,
+        backgroundColor: colors,
+        borderRadius: 3,
+        borderWidth: 0,
+      }]
+    },
+    options: opts,
+  });
+}
+
+// ── NEW: Server Distribution Chart ───────────────────────────
+function renderServerDistChart(data) {
+  destroyChart("serverChart");
+  const ctx = document.getElementById("serverChart");
+  if (!ctx) return;
+
+  const counts = {};
+  data.forEach(r => {
+    const s = r.serverName || "Unknown";
+    counts[s] = (counts[s] || 0) + 1;
+  });
+  const sorted = Object.entries(counts)
+    .filter(([k]) => k !== "Unknown" || Object.keys(counts).length === 1)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12);
+  if (!sorted.length) return;
+
+  const opts = baseOpts();
+  opts.indexAxis = "y";
+  opts.plugins.legend.display = false;
+  opts.scales.x.ticks.stepSize = 1;
+
+  charts.serverChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: sorted.map(([k]) => k),
+      datasets: [{
+        label: "Findings",
+        data: sorted.map(([, v]) => v),
+        backgroundColor: PALETTE.slice(0, sorted.length),
+        borderRadius: 4,
+      }]
+    },
+    options: opts,
+  });
+}
+
+// ── NEW: Session Duration Distribution ───────────────────────
+function renderDurationChart(data) {
+  destroyChart("durationChart");
+  const ctx = document.getElementById("durationChart");
+  if (!ctx) return;
+
+  const buckets = { "0–5m": 0, "5–15m": 0, "15–30m": 0, "30–60m": 0, "60m+": 0, "N/A": 0 };
+  data.forEach(r => {
+    const d = r.sessionDurMins;
+    if (d === null || d === undefined) { buckets["N/A"]++; return; }
+    if (d <= 5)       buckets["0–5m"]++;
+    else if (d <= 15) buckets["5–15m"]++;
+    else if (d <= 30) buckets["15–30m"]++;
+    else if (d <= 60) buckets["30–60m"]++;
+    else              buckets["60m+"]++;
+  });
+
+  const labels = Object.keys(buckets).filter(k => buckets[k] > 0);
+  const values = labels.map(k => buckets[k]);
+  const colors = ["#667eea","#64ffda","#ffd700","#ff9966","#ff6b6b","#444"];
+
+  const opts = baseOpts(true);
+  opts.cutout = "58%";
+  opts.plugins.legend = { position: "right", labels: { color: "#e0e0e0", padding: 12, boxWidth: 12, font: { size: 12 } } };
+  opts.plugins.tooltip = {
+    backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0",
+    borderColor: "#2a2a40", borderWidth: 1,
+    callbacks: {
+      label: c => {
+        const total = c.dataset.data.reduce((s, v) => s + v, 0);
+        return ` ${c.label}: ${c.parsed} (${((c.parsed / total) * 100).toFixed(1)}%)`;
+      }
+    }
+  };
+
+  charts.durationChart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: colors.slice(0, labels.length), borderColor: "#0f0f23", borderWidth: 2 }]
+    },
+    options: opts,
+  });
+}
+
+// ── NEW: Quick Intel Stats bar ────────────────────────────────
+function renderQuickIntelStats(data) {
+  const el = document.getElementById("quickIntelBar");
+  if (!el) return;
+
+  if (!data.length) {
+    el.innerHTML = `<div class="qi-card" style="grid-column:1/-1;justify-content:center;"><span style="color:#666;font-size:13px;">No data to analyse</span></div>`;
+    return;
+  }
+
+  // Avg session duration
+  const durs = data.map(r => r.sessionDurMins).filter(d => d !== null && d !== undefined);
+  const avgDur = durs.length ? (durs.reduce((s, v) => s + v, 0) / durs.length).toFixed(1) : "—";
+  const avgDurDisplay = durs.length ? avgDur + "m" : "—";
+
+  // Peak hour
+  const hourCounts = new Array(24).fill(0);
+  data.forEach(r => { if (r.hour !== null && r.hour !== undefined) hourCounts[r.hour]++; });
+  const peakHour = hourCounts.indexOf(Math.max(...hourCounts));
+  const peakHourStr = hourCounts[peakHour] > 0 ? `${String(peakHour).padStart(2,"0")}:00` : "—";
+
+  // Top server
+  const serverCounts = {};
+  data.forEach(r => { if (r.serverName) serverCounts[r.serverName] = (serverCounts[r.serverName] || 0) + 1; });
+  const topServerEntry = Object.entries(serverCounts).sort((a, b) => b[1] - a[1])[0];
+  const topServer   = topServerEntry ? topServerEntry[0] : "—";
+  const topServerCt = topServerEntry ? topServerEntry[1] : 0;
+
+  // Top coupon site
+  const couponCounts = {};
+  data.forEach(r => {
+    if (r.couponSite) {
+      try { const h = new URL(r.couponSite).hostname.replace("www.", ""); couponCounts[h] = (couponCounts[h] || 0) + 1; }
+      catch(e) {}
+    }
+  });
+  const topCouponEntry = Object.entries(couponCounts).sort((a, b) => b[1] - a[1])[0];
+  const topCoupon = topCouponEntry ? topCouponEntry[0] : "—";
+
+  // Cookie stuffing %
+  const csCount = data.filter(r => r.voilationTypeFLP && r.voilationTypeFLP.toLowerCase().includes("cookie")).length;
+  const csPct = data.length > 0 ? ((csCount / data.length) * 100).toFixed(1) : "0";
+
+  function card(icon, value, label, iconBg) {
+    return `<div class="qi-card">
+      <div class="qi-icon-wrap" style="background:${iconBg || "rgba(102,126,234,0.12)"};">${icon}</div>
+      <div class="qi-body">
+        <div class="qi-value" title="${value}">${value}</div>
+        <div class="qi-label">${label}</div>
+      </div>
+    </div>`;
+  }
+
+  el.innerHTML =
+    card("⏱", avgDurDisplay,   "Avg Session",       "rgba(100,255,218,0.1)") +
+    card("🕐", peakHourStr,    "Peak Hour",          "rgba(255,215,0,0.1)") +
+    card("🖥️", topServer,      `Top Server (${topServerCt})`, "rgba(79,172,254,0.1)") +
+    card("🛍️", topCoupon,      "Top Coupon Site",   "rgba(255,153,102,0.1)") +
+    card("🍪", csPct + "%",    "Cookie Stuffing",   "rgba(255,75,92,0.1)");
+}
+
 
 // 1. Findings Over Time — with 7-day rolling avg + cumulative toggle
 function renderTimelineChart(data) {
@@ -662,59 +931,47 @@ function renderTimelineChart(data) {
 
   charts.timeline = new Chart(ctx, { type: "bar", data: { labels, datasets }, options: opts });
 }
-
-// 2. Violation Type Donut
-function renderViolationDonut(data) {
-  destroyChart("violations");
-  const ctx = document.getElementById("violationsChart");
-  if (!ctx) return;
-  const counts = {};
-  data.forEach(r => {
-    const v = r.voilationTypeFLP || "Unknown";
-    counts[v] = (counts[v] || 0) + 1;
-  });
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  charts.violations = new Chart(ctx, {
-    type: "doughnut",
-    data: {
-      labels: sorted.map(([k]) => k),
-      datasets: [{ data: sorted.map(([, v]) => v), backgroundColor: PALETTE, borderColor: "#0f0f23", borderWidth: 2, hoverOffset: 8 }],
-    },
-    options: {
-      ...baseOpts(true),
-      cutout: "60%",
-      plugins: {
-        legend: { position: "right", labels: { color: "#e0e0e0", padding: 12, boxWidth: 14 } },
-        tooltip: { backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0", borderColor: "#2a2a40", borderWidth: 1 },
-      },
-    },
-  });
-}
-
-// 3. Network Distribution
+// 3. Top Networks Chart (Restored)
 function renderNetworkDistChart(data) {
   destroyChart("networkDist");
   const ctx = document.getElementById("networkDistChart");
   if (!ctx) return;
+
   const counts = {};
   data.forEach(r => {
-    if (r.networks) r.networks.split(",").forEach(n => { const net = n.trim(); if (net) counts[net] = (counts[net] || 0) + 1; });
+    if (r.networks) r.networks.split(",").forEach(n => {
+      const net = n.trim();
+      if (net) counts[net] = (counts[net] || 0) + 1;
+    });
   });
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 12);
-  const opts = baseOpts();
-  opts.indexAxis = "y";
-  opts.plugins.legend.display = false;
+
+  const sorted = Object.entries(counts).sort((a,b) => b[1] - a[1]).slice(0, 8);
+  if (!sorted.length) return;
+
+  const labels = sorted.map(s => s[0]);
+  const values = sorted.map(s => s[1]);
+
   charts.networkDist = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: sorted.map(([k]) => k),
-      datasets: [{ label: "Findings", data: sorted.map(([, v]) => v), backgroundColor: sorted.map((_, i) => PALETTE[i % PALETTE.length]), borderRadius: 4 }],
+      labels,
+      datasets: [{
+        label: "Findings",
+        data: values,
+        backgroundColor: PALETTE.slice(0, labels.length),
+        borderRadius: 4
+      }]
     },
-    options: opts,
+    options: {
+      ...baseOpts(),
+      indexAxis: "y",
+      plugins: { legend: { display: false } }
+    }
   });
 }
 
-// ── NEW: BEP vs OLM Type Chart ────────────────────────────
+
+// 2. BEP vs OLM Type Chart
 function renderTypeChart(data) {
   destroyChart("typeChart");
   const ctx = document.getElementById("typeChart");
@@ -756,86 +1013,7 @@ function renderTypeChart(data) {
   });
 }
 
-// ── Session Duration Distribution ────────────────────────────
-function renderSessionDurationChart(data) {
-  destroyChart("sessionDuration");
-  const ctx = document.getElementById("sessionDurationChart");
-  if (!ctx) return;
-  const buckets = { "<2m": 0, "2-5m": 0, "5-10m": 0, "10-20m": 0, ">20m": 0 };
-  data.forEach(r => {
-    const d = r.sessionDurMins;
-    if (d === null) return;
-    if (d < 2) buckets["<2m"]++;
-    else if (d < 5) buckets["2-5m"]++;
-    else if (d < 10) buckets["5-10m"]++;
-    else if (d < 20) buckets["10-20m"]++;
-    else buckets[">20m"]++;
-  });
-  const labels = Object.keys(buckets);
-  const values = Object.values(buckets);
-  const opts = baseOpts();
-  opts.plugins.legend.display = false;
-  opts.scales.x.title = { display: true, text: "Session Length", color: "#666", font: { size: 11 } };
-  charts.sessionDuration = new Chart(ctx, {
-    type: "bar",
-    data: { labels, datasets: [{ label: "Sessions", data: values, backgroundColor: ["#43e97b","#64ffda","#667eea","#ffd700","#ff6b6b"], borderRadius: 5 }] },
-    options: opts,
-  });
-}
-
-// ── Publisher (injected pub ID) Distribution Chart ────────────
-function renderPublisherChart(data) {
-  destroyChart("publisherChart");
-  const ctx = document.getElementById("publisherChart");
-  if (!ctx) return;
-  const counts = {};
-  data.forEach(r => { if (r.pubValue) counts[r.pubValue] = (counts[r.pubValue] || 0) + 1; });
-  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0, 12);
-  if (!sorted.length) return;
-  const opts = baseOpts();
-  opts.indexAxis = "y";
-  opts.plugins.legend.display = false;
-  charts.publisherChart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels: sorted.map(([k]) => k),
-      datasets: [{ label: "Injections", data: sorted.map(([,v])=>v), backgroundColor: sorted.map((_,i)=>PALETTE[i%PALETTE.length]), borderRadius: 4 }],
-    },
-    options: opts,
-  });
-}
-
-// ── Coupon Site Source Chart ───────────────────────────────────
-function renderCouponSiteChart(data) {
-  destroyChart("couponSiteChart");
-  const ctx = document.getElementById("couponSiteChart");
-  if (!ctx) return;
-  const counts = {};
-  data.forEach(r => {
-    if (!r.couponSite) return;
-    try { const host = new URL(r.couponSite).hostname.replace("www.",""); counts[host] = (counts[host]||0)+1; }
-    catch(e) { counts[r.couponSite] = (counts[r.couponSite]||0)+1; }
-  });
-  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0, 10);
-  if (!sorted.length) return;
-  charts.couponSiteChart = new Chart(ctx, {
-    type: "doughnut",
-    data: {
-      labels: sorted.map(([k])=>k),
-      datasets: [{ data: sorted.map(([,v])=>v), backgroundColor: PALETTE, borderColor: "#0f0f23", borderWidth: 2, hoverOffset: 8 }],
-    },
-    options: {
-      ...baseOpts(true), cutout: "60%",
-      plugins: {
-        legend: { position: "right", labels: { color: "#e0e0e0", padding: 10, boxWidth: 12, font: { size: 11 } } },
-        tooltip: { backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0", borderColor: "#2a2a40", borderWidth: 1 },
-      },
-    },
-  });
-}
-
 // ── Publisher Intelligence Table ─────────────────────────────
-// Uses pubValue directly — no regex needed, ground truth from API
 function renderPublisherIntelTable(data) {
   const tbody = document.querySelector("#publisherIntelTable tbody");
   if (!tbody) return;
@@ -893,93 +1071,6 @@ function renderPublisherIntelTable(data) {
       catch(e) { return `<span class="net-tag">${esc(s)}</span>`; }
     }).join(" ") || `<span style="color:#444;">—</span>`;
     tr.append(rankTd, idTd, extTd, brandTd, countTd, couponTd);
-    frag.appendChild(tr);
-  });
-  tbody.appendChild(frag);
-}
-
-// ── Advertiser (Merchant) Analysis Table ─────────────────────
-function renderAdvertiserTable(data) {
-  const tbody = document.querySelector("#advertiserTable tbody");
-  if (!tbody) return;
-  const advMap = {};
-  data.forEach(r => {
-    if (!r.advValue) return;
-    const key = r.advValue;
-    if (!advMap[key]) advMap[key] = {
-      advValue: key, advName: r.advName,
-      brands: new Set(), networks: new Set(), extensions: new Set(), count: 0,
-    };
-    advMap[key].brands.add(r.keyword);
-    advMap[key].networks.add(r.networks);
-    advMap[key].extensions.add(r.extensionId);
-    advMap[key].count++;
-  });
-  const sorted = Object.values(advMap).sort((a,b)=>b.count-a.count);
-  const badge = document.getElementById("advertiserCount");
-  if (badge) badge.textContent = sorted.length;
-
-  if (!sorted.length) { setTableMessage("#advertiserTable tbody","No advertiser data in current filter.",5); return; }
-  tbody.innerHTML = "";
-  const frag = document.createDocumentFragment();
-  sorted.forEach((a, idx) => {
-    const tr = document.createElement("tr");
-    const rankTd = document.createElement("td"); rankTd.innerHTML = `<span class="rank-num">#${idx+1}</span>`;
-    const advTd = document.createElement("td");
-    advTd.innerHTML = `<code class="aff-id-code">${esc(a.advValue)}</code>
-      ${a.advName ? `<span style="font-size:11px;color:#666;margin-left:6px;">(${esc(a.advName)})</span>` : ""}
-      <button class="copy-btn" onclick="copyToClipboard('${a.advValue.replace(/'/g,"\\'")}',this)" title="Copy">📋</button>`;
-    const brandTd = document.createElement("td");
-    brandTd.innerHTML = [...a.brands].slice(0,4).map(b=>`<span class="net-tag">${esc(b)}</span>`).join(" ");
-    const netTd = document.createElement("td"); netTd.textContent = [...a.networks].join(", ");
-    const countTd = document.createElement("td"); countTd.innerHTML = `<span class="badge">${a.count}</span>`;
-    tr.append(rankTd, advTd, brandTd, netTd, countTd);
-    frag.appendChild(tr);
-  });
-  tbody.appendChild(frag);
-}
-
-// ── Coupon Site Attack Surface Table ─────────────────────────
-function renderCouponSiteTable(data) {
-  const tbody = document.querySelector("#couponSiteTable tbody");
-  if (!tbody) return;
-  const siteMap = {};
-  data.forEach(r => {
-    if (!r.couponSite) return;
-    let host;
-    try { host = new URL(r.couponSite).hostname.replace("www.",""); }
-    catch(e) { host = r.couponSite; }
-    if (!siteMap[host]) siteMap[host] = {
-      host, fullUrl: r.couponSite, extensions: new Set(), brands: new Set(), networks: new Set(), count: 0,
-    };
-    siteMap[host].extensions.add(r.extensionId);
-    siteMap[host].brands.add(r.keyword);
-    siteMap[host].networks.add(r.networks);
-    siteMap[host].count++;
-  });
-  const sorted = Object.values(siteMap).sort((a,b)=>b.count-a.count);
-  const badge = document.getElementById("couponSiteCount");
-  if (badge) badge.textContent = sorted.length;
-
-  if (!sorted.length) { setTableMessage("#couponSiteTable tbody","No coupon site data in current filter.",5); return; }
-  tbody.innerHTML = "";
-  const frag = document.createDocumentFragment();
-  sorted.forEach((s, idx) => {
-    const tr = document.createElement("tr");
-    tr.style.cursor = "pointer";
-    tr.title = `Click to filter to coupon site: ${s.host}`;
-    tr.addEventListener("click", () => {
-      const sel = document.getElementById("couponSiteFilter");
-      if (sel) { sel.value = s.fullUrl; applyFilters(); }
-    });
-    const rankTd = document.createElement("td"); rankTd.innerHTML = `<span class="rank-num">#${idx+1}</span>`;
-    const siteTd = document.createElement("td");
-    siteTd.innerHTML = `<a href="${esc(s.fullUrl)}" target="_blank" rel="noopener" class="ev-url-val" style="font-size:13px;">${esc(s.host)}</a>`;
-    const extTd = document.createElement("td"); extTd.textContent = s.extensions.size;
-    const brandTd = document.createElement("td");
-    brandTd.innerHTML = [...s.brands].slice(0,4).map(b=>`<span class="net-tag">${esc(b)}</span>`).join(" ");
-    const countTd = document.createElement("td"); countTd.innerHTML = `<span class="badge">${s.count}</span>`;
-    tr.append(rankTd, siteTd, extTd, brandTd, countTd);
     frag.appendChild(tr);
   });
   tbody.appendChild(frag);
@@ -1397,71 +1488,7 @@ function openLightbox(params) {
 function closeLightbox(e) { closeEvidenceModal(e); }
 
 // ── NEW: Affiliate Fingerprint (injected ID clusters) ─────
-function renderAffiliateFingerprintTable(data) {
-  const tbody = document.querySelector("#affiliateFingerprintTable tbody");
-  if (!tbody) return;
-
-  // Group by injected pub ID from redirectionURL2FLP — extract id= param (LinkShare/Rakuten pattern)
-  // Fall back to pubValue if extraction fails (pubValue is the ORIGINAL — just for reference)
-  const fingerprintMap = {};
-  data.forEach(r => {
-    if (!r.redirectionURL2FLP) return;
-    let injId = null;
-    try {
-      const u = new URL(r.redirectionURL2FLP);
-      injId = u.searchParams.get("id") || u.searchParams.get(r.pubName) || null;
-    } catch(e) {}
-    if (!injId) return;
-    if (!fingerprintMap[injId]) fingerprintMap[injId] = {
-      id: injId, extensions: new Set(), brands: new Set(), networks: new Set(), count: 0, couponSites: new Set(),
-    };
-    fingerprintMap[injId].extensions.add(r.extensionId);
-    fingerprintMap[injId].brands.add(r.keyword);
-    fingerprintMap[injId].networks.add(r.networks);
-    if (r.couponSite) fingerprintMap[injId].couponSites.add(r.couponSite);
-    fingerprintMap[injId].count++;
-  });
-
-  const sorted = Object.values(fingerprintMap).sort((a, b) => b.extensions.size - a.extensions.size || b.count - a.count);
-
-  if (sorted.length === 0) {
-    setTableMessage("#affiliateFingerprintTable tbody", "No injected affiliate IDs found in current filter.", 6);
-    return;
-  }
-
-  tbody.innerHTML = "";
-  const frag = document.createDocumentFragment();
-  sorted.forEach((fp, idx) => {
-    const tr = document.createElement("tr");
-    const isSuspect = fp.extensions.size > 1;
-
-    const rankTd = document.createElement("td"); rankTd.innerHTML = `<span class="rank-num">#${idx + 1}</span>`;
-    const idTd = document.createElement("td");
-    idTd.innerHTML = `<code class="aff-id-code ${isSuspect ? "aff-suspect" : ""}">${esc(fp.id)}</code>
-      ${isSuspect ? ' <span class="fraud-badge">⚠️ Multi-ext</span>' : ''}
-      <button class="copy-btn" onclick="copyToClipboard('${esc(fp.id).replace(/'/g,"\\'")}',this)" title="Copy">📋</button>`;
-    const extTd = document.createElement("td"); extTd.textContent = fp.extensions.size;
-    const brandTd = document.createElement("td"); brandTd.textContent = fp.brands.size;
-    const countTd = document.createElement("td"); countTd.textContent = fp.count;
-    const couponTd = document.createElement("td");
-    couponTd.innerHTML = [...fp.couponSites].slice(0,3).map(s => {
-      try { return `<span class="net-tag">${esc(new URL(s).hostname.replace("www.",""))}</span>`; }
-      catch(e) { return `<span class="net-tag">${esc(s)}</span>`; }
-    }).join(" ") || "-";
-    const netTd = document.createElement("td");
-    netTd.innerHTML = [...fp.networks].map(n => `<span class="net-tag">${esc(n)}</span>`).join(" ");
-    tr.append(rankTd, idTd, extTd, brandTd, countTd, couponTd, netTd);
-    frag.appendChild(tr);
-  });
-  tbody.appendChild(frag);
-
-  const badge = document.getElementById("fingerprintCount");
-  if (badge) badge.textContent = sorted.length;
-  const suspectBadge = document.getElementById("suspectCount");
-  if (suspectBadge) suspectBadge.textContent = sorted.filter(f => f.extensions.size > 1).length;
-  const kpiFP = document.getElementById("kpiFingerprintSuspect");
-  if (kpiFP) kpiFP.textContent = sorted.filter(f => f.extensions.size > 1).length;
-}
+// 4. Extension Risk Score
 
 // 4. Extension Risk Score
 const VIOLATION_WEIGHTS = { "critical": 5, "high": 4, "medium": 3, "low": 2 };
@@ -1666,29 +1693,9 @@ function updateBrandSummaryTable(data) {
   tbody.appendChild(frag);
 }
 
-// Top 15 Brands Chart
+// Top 15 Brands Chart (Removed)
 function renderTopBrandsChart(data) {
-  destroyChart("topBrands");
-  const ctx = document.getElementById("topBrandsChart");
-  if (!ctx) return;
-  const top = data.slice(0, 15);
-  const opts = baseOpts();
-  opts.indexAxis = "y";
-  opts.plugins.legend.display = false;
-  opts.scales.x.ticks.stepSize = 1;
-  charts.topBrands = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels: top.map(b => b.brand),
-      datasets: [{
-        label: "Findings",
-        data: top.map(b => b.totalFindings),
-        backgroundColor: top.map(b => b.trend.diff > 0 ? "rgba(255,107,107,0.8)" : b.trend.diff < 0 ? "rgba(67,233,123,0.8)" : "rgba(102,126,234,0.8)"),
-        borderRadius: 4,
-      }],
-    },
-    options: opts,
-  });
+  return;
 }
 
 // Brand Detail — show/close
@@ -1871,6 +1878,126 @@ function fetchVmWiseAdware() {
     });
 }
 
+function renderServerExtensionMatrix(adwareData, findingsData) {
+  const summaryGrid = document.getElementById("serverSummaryGrid");
+  if (!summaryGrid) return;
+
+  // 1. Group by Server
+  const serverMap = {};
+
+  // Adware data (potential findings)
+  adwareData.forEach(ad => {
+    const sName = ad.vmName || "Unknown";
+    const sKey = sName.toLowerCase();
+    if (!serverMap[sKey]) {
+      serverMap[sKey] = { name: sName, findingsCount: 0, adwareCount: 0, extensions: {} };
+    }
+    const extId = ad.extensionId;
+    if (!serverMap[sKey].extensions[extId]) {
+      serverMap[sKey].extensions[extId] = { id: extId, name: ad.extensionName, findings: 0, isInstalled: true, lastDate: null };
+      serverMap[sKey].adwareCount++;
+    }
+  });
+
+  // Findings data
+  findingsData.forEach(f => {
+    const sName = f.serverName || f.vm || "Unknown";
+    const sKey = sName.toLowerCase();
+    if (!serverMap[sKey]) {
+      serverMap[sKey] = { name: sName, findingsCount: 0, adwareCount: 0, extensions: {} };
+    }
+    const extId = f.extensionId;
+    if (!serverMap[sKey].extensions[extId]) {
+      serverMap[sKey].extensions[extId] = { id: extId, name: f.extensionName, findings: 0, isInstalled: false, lastDate: null };
+    }
+    const e = serverMap[sKey].extensions[extId];
+    e.findings++;
+    serverMap[sKey].findingsCount++;
+
+    // Track last date
+    if (f.automationStart) {
+      if (!e.lastDate || f.automationStart > e.lastDate) {
+        e.lastDate = f.automationStart;
+      }
+    }
+  });
+
+  state.serverMatrixCache = serverMap;
+
+  // 2. Render Summary Grid
+  summaryGrid.innerHTML = "";
+  Object.values(serverMap).sort((a,b) => b.findingsCount - a.findingsCount || a.name.localeCompare(b.name)).forEach(s => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.style.cursor = "pointer";
+    card.style.border = s.findingsCount > 0 ? "1px solid rgba(100,255,218,0.2)" : "1px solid rgba(255,255,255,0.05)";
+    card.onclick = () => showServerDetail(s.name);
+    
+    const loc = state.vmRackInfo[s.name.toLowerCase()] || "";
+    
+    card.innerHTML = `
+      <div class="card-content">
+        <div class="card-value" style="font-size: 18px; color: #64ffda;">${esc(s.name)}</div>
+        <div class="card-label">${loc ? esc(loc) : "Server"}</div>
+        <div style="margin-top: 12px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 12px; color: #b0b0b0;">Findings: <b style="color: ${s.findingsCount > 0 ? "#64ffda" : "#666"};">${s.findingsCount}</b></span>
+          <span style="font-size: 12px; color: #b0b0b0;">Adware: <b>${s.adwareCount}</b></span>
+        </div>
+      </div>
+    `;
+    summaryGrid.appendChild(card);
+  });
+}
+
+function showServerDetail(serverName) {
+  const section = document.getElementById("serverDetailSection");
+  const title = document.getElementById("selectedServerTitle");
+  const tbody = document.querySelector("#serverExtensionMatrixTable tbody");
+  if (!section || !title || !tbody) return;
+
+  const serverData = state.serverMatrixCache[serverName.toLowerCase()];
+  if (!serverData) return;
+
+  title.textContent = `Server Detail: ${serverName}`;
+  section.style.display = "block";
+  section.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+  tbody.innerHTML = "";
+  const exts = Object.values(serverData.extensions).sort((a,b) => b.findings - a.findings);
+
+  const frag = document.createDocumentFragment();
+  exts.forEach(e => {
+    const tr = document.createElement("tr");
+    
+    const nameTd = document.createElement("td");
+    nameTd.innerHTML = `<b>${esc(e.name)}</b><br><span style="font-size:11px;color:#888;">${esc(e.id)}</span>`;
+    
+    const countTd = document.createElement("td");
+    countTd.innerHTML = `<span class="badge" style="background:${e.findings > 0 ? "rgba(102,126,234,0.2)" : "rgba(255,107,107,0.1)"}; color:${e.findings > 0 ? "#64ffda" : "#ff6b6b"};">${e.findings}</span>`;
+    
+    const dateTd = document.createElement("td");
+    dateTd.innerHTML = `<span style="font-size:12px;color:#b0b0b0;">${e.lastDate ? fmtDate(e.lastDate) : "—"}</span>`;
+
+    const statusTd = document.createElement("td");
+    if (e.findings > 0) {
+      statusTd.innerHTML = `<span style="color:#43e97b; font-size:12px;">● Active Finding</span>`;
+    } else if (e.isInstalled) {
+      statusTd.innerHTML = `<span style="color:#ff6b6b; font-size:12px;">○ 0 Findings (Installed Adware)</span>`;
+    } else {
+      statusTd.innerHTML = `<span style="color:#888; font-size:12px;">- Manual Found</span>`;
+    }
+
+    tr.append(nameTd, countTd, dateTd, statusTd);
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+}
+
+function hideServerDetail() {
+  const section = document.getElementById("serverDetailSection");
+  if (section) section.style.display = "none";
+}
+
 function applyVmAdwareFilters() {
   const selectedVm = document.getElementById("vmFilter")?.value || "";
   const selectedExt = document.getElementById("vmAdwareExtensionFilter")?.value || "";
@@ -1882,6 +2009,7 @@ function applyVmAdwareFilters() {
   state.filteredVmAdwareData = filtered;
   updateVmAdwareTable(filtered);
   renderVmAdwareChart(filtered);
+  renderServerExtensionMatrix(filtered, state.raw);
 }
 
 function updateVmAdwareTable(data) {
@@ -1907,75 +2035,7 @@ function updateVmAdwareTable(data) {
 }
 
 function renderVmAdwareChart(data) {
-  destroyChart("vmAdware");
-  const ctx = document.getElementById("vmAdwareChart");
-  if (!ctx) return;
-  const vmCounts = {};
-  data.forEach(r => { const vm = r.vmName || "Unknown"; vmCounts[vm] = (vmCounts[vm] || 0) + 1; });
-  const sorted = Object.entries(vmCounts).sort((a, b) => b[1] - a[1]);
-  if (sorted.length === 0) return;
-  const opts = baseOpts();
-  opts.plugins.legend.display = false;
-  opts.scales.x.ticks.maxRotation = 40;
-  charts.vmAdware = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels: sorted.map(([k]) => k),
-      datasets: [{ label: "Adware Count", data: sorted.map(([, v]) => v), backgroundColor: sorted.map((_, i) => PALETTE[i % PALETTE.length]), borderRadius: 4 }],
-    },
-    options: opts,
-  });
-
-  // Browser donut
-  destroyChart("vmBrowser");
-  const bCtx = document.getElementById("vmBrowserChart");
-  if (bCtx) {
-    const bCounts = {};
-    data.forEach(r => { const b = r.browser || "Unknown"; bCounts[b] = (bCounts[b] || 0) + 1; });
-    const bSorted = Object.entries(bCounts).sort((a,b) => b[1]-a[1]);
-    if (bSorted.length > 0) {
-      charts.vmBrowser = new Chart(bCtx, {
-        type: "doughnut",
-        data: {
-          labels: bSorted.map(([k]) => k),
-          datasets: [{ data: bSorted.map(([,v]) => v), backgroundColor: PALETTE.slice(3), borderColor: "#0f0f23", borderWidth: 2, hoverOffset: 8 }],
-        },
-        options: {
-          ...baseOpts(true), cutout: "60%",
-          plugins: {
-            legend: { position: "bottom", labels: { color: "#e0e0e0", padding: 10, boxWidth: 12, font: { size: 11 } } },
-            tooltip: { backgroundColor: "#1a1a2e", titleColor: "#64ffda", bodyColor: "#e0e0e0", borderColor: "#2a2a40", borderWidth: 1 },
-          },
-        },
-      });
-    }
-  }
-
-  // VM Adware Timeline
-  destroyChart("vmTimeline");
-  const tCtx = document.getElementById("vmAdwareTimelineChart");
-  if (tCtx) {
-    const dateCounts = {};
-    data.forEach(r => {
-      if (r.createddate) {
-        const d = r.createddate.split(" ")[0];
-        dateCounts[d] = (dateCounts[d] || 0) + 1;
-      }
-    });
-    const labels = Object.keys(dateCounts).sort();
-    const values = labels.map(l => dateCounts[l]);
-    if (labels.length > 0) {
-      const opts2 = baseOpts();
-      opts2.plugins.legend.display = false;
-      opts2.scales.x.ticks.maxTicksLimit = 12;
-      opts2.scales.x.ticks.maxRotation = 40;
-      charts.vmTimeline = new Chart(tCtx, {
-        type: "bar",
-        data: { labels, datasets: [{ label: "Adware Installations", data: values, backgroundColor: "rgba(161,143,255,0.65)", borderColor: "#a18fff", borderWidth: 1, borderRadius: 3 }] },
-        options: opts2,
-      });
-    }
-  }
+  return;
 }
 
 // ============================================================
@@ -2039,6 +2099,7 @@ function initUpdateBtn() {
   });
 }
 
+
 // ============================================================
 // DOMContentLoaded
 // ============================================================
@@ -2056,12 +2117,12 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("typeFilter")?.addEventListener("change", applyFilters);
   document.getElementById("pubFilter")?.addEventListener("change", applyFilters);
   document.getElementById("couponSiteFilter")?.addEventListener("change", applyFilters);
-  document.getElementById("searchBox")?.addEventListener("input", applyFilters);
-  document.getElementById("extensionIdNameBox")?.addEventListener("input", applyFilters);
-  document.getElementById("brandSearchBox")?.addEventListener("input", applyBrandFilters);
+  document.getElementById("searchBox")?.addEventListener("input", debouncedApplyFilters);
+  document.getElementById("extensionIdNameBox")?.addEventListener("input", debouncedApplyFilters);
+  document.getElementById("brandSearchBox")?.addEventListener("input", debouncedApplyBrandFilters);
   document.getElementById("vmFilter")?.addEventListener("change", applyVmAdwareFilters);
   document.getElementById("vmAdwareExtensionFilter")?.addEventListener("change", applyVmAdwareFilters);
-  document.getElementById("vmAdwareSearchBox")?.addEventListener("input", applyVmAdwareFilters);
+  document.getElementById("vmAdwareSearchBox")?.addEventListener("input", debouncedApplyVmFilters);
 
   // Timeline toggles
   document.getElementById("showRollingAvg")?.addEventListener("change", () => renderTimelineChart(state.filtered.length ? state.filtered : state.raw));
@@ -2125,5 +2186,76 @@ document.addEventListener("DOMContentLoaded", function () {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "VM Adware Data");
     XLSX.writeFile(wb, "vm_adware_report.xlsx");
+  });
+});
+
+// ============================================================
+// DEBOUNCE UTILITY
+// ============================================================
+function debounce(fn, delay) {
+  let timer;
+  return function (...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+const debouncedApplyFilters      = debounce(applyFilters, 200);
+const debouncedApplyBrandFilters = debounce(applyBrandFilters, 200);
+const debouncedApplyVmFilters    = debounce(applyVmAdwareFilters, 200);
+
+// ============================================================
+// UTILITY FUNCTIONS (single canonical definitions)
+// ============================================================
+function scrollToTop() {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function scrollToBottom() {
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+}
+
+function clearAllFilters() {
+  document.querySelectorAll('select').forEach(sel => sel.value = '');
+
+  document.querySelectorAll('.flatpickr-input').forEach(input => {
+    if (input._flatpickr) input._flatpickr.clear();
+    else input.value = '';
+  });
+
+  ['searchBox', 'extensionIdNameBox', 'brandSearchBox', 'vmSearchBox', 'vmAdwareSearchBox'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+
+  matrixFilter = { brand: null, network: null };
+  const clearMatrixBtn = document.getElementById('clearMatrixFilterBtn');
+  if (clearMatrixBtn) clearMatrixBtn.style.display = 'none';
+
+  if (typeof applyFilters === 'function') applyFilters();
+  if (typeof applyBrandFilters === 'function') applyBrandFilters();
+  if (typeof applyVmAdwareFilters === 'function') applyVmAdwareFilters();
+
+  document.getElementById('floatingUtils')?.classList.remove('active');
+  scrollToTop();
+}
+
+// ============================================================
+// FAB / FLOATING MENU (single canonical setup — runs after DOM ready)
+// ============================================================
+document.addEventListener('DOMContentLoaded', function () {
+  const fabMain     = document.getElementById('fabMain');
+  const floatingUtils = document.getElementById('floatingUtils');
+  if (!fabMain || !floatingUtils) return;
+
+  fabMain.addEventListener('click', function (e) {
+    e.stopPropagation();
+    floatingUtils.classList.toggle('active');
+  });
+
+  document.addEventListener('click', function (e) {
+    if (!floatingUtils.contains(e.target)) {
+      floatingUtils.classList.remove('active');
+    }
   });
 });

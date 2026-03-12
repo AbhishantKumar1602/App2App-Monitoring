@@ -93,7 +93,8 @@ def main():
                     "pubValue": r.get("pubValue"),
                     "advName": r.get("advName"),
                     "advValue": r.get("advValue"),
-                    "vm": r.get("vm")
+                    "vm": r.get("vm"),
+                    "serverName": r.get("serverName")
                 })
 
     # ---------- Sheet 1 ----------

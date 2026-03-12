@@ -19,6 +19,14 @@
     <div class="user-info"><span>Welcome back!</span></div>
   </div>
 
+  <!-- Loading progress bar -->
+  <div id="loadProgressWrap" style="display:none;align-items:center;gap:12px;margin-bottom:18px;padding:12px 16px;background:#1a1a2e;border-radius:10px;border:1px solid #2a2a40;">
+    <div style="flex:1;height:6px;background:#0f0f23;border-radius:3px;overflow:hidden;">
+      <div id="loadProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#667eea,#64ffda);border-radius:3px;transition:width 0.3s ease;"></div>
+    </div>
+    <span id="loadProgressText" style="color:#64ffda;font-size:12px;white-space:nowrap;min-width:130px;">Loading…</span>
+  </div>
+
   <!-- ══════════════════════════════════════════════
        ANOMALY ALERT BANNER
   ══════════════════════════════════════════════ -->
@@ -164,6 +172,86 @@
           <input type="text" id="searchBox" placeholder="Brand, Incident, Network, Extension, Publisher...">
         </div>
       </div>
+    </div><!-- /filters-section -->
+
+    <!-- ── QUICK INTEL BAR ── -->
+    <style>
+      #quickIntelBar {
+        display: grid !important;
+        grid-template-columns: repeat(5, 1fr) !important;
+        gap: 12px !important;
+        margin-bottom: 24px !important;
+      }
+      @media (max-width: 900px) { #quickIntelBar { grid-template-columns: repeat(3,1fr) !important; } }
+      @media (max-width: 580px) { #quickIntelBar { grid-template-columns: repeat(2,1fr) !important; } }
+
+      .qi-card {
+        display: flex !important;
+        align-items: center !important;
+        gap: 12px !important;
+        padding: 14px 18px !important;
+        background: #1a1a2e !important;
+        border: 1px solid #2a2a40 !important;
+        border-radius: 12px !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important;
+        transition: border-color 0.2s, transform 0.2s !important;
+        cursor: default !important;
+        min-width: 0 !important;
+      }
+      .qi-card:hover {
+        border-color: rgba(100,255,218,0.4) !important;
+        transform: translateY(-2px) !important;
+      }
+      .qi-icon-wrap {
+        width: 40px !important;
+        height: 40px !important;
+        min-width: 40px !important;
+        border-radius: 10px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-size: 20px !important;
+        background: rgba(102,126,234,0.12) !important;
+      }
+      .qi-body { min-width: 0 !important; flex: 1 !important; }
+      .qi-value {
+        font-size: 18px !important;
+        font-weight: 700 !important;
+        color: #64ffda !important;
+        line-height: 1.2 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+      }
+      .qi-label {
+        font-size: 11px !important;
+        color: #666 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.7px !important;
+        margin-top: 3px !important;
+        white-space: nowrap !important;
+      }
+      /* skeleton shimmer while loading */
+      .qi-skeleton {
+        height: 18px !important;
+        border-radius: 6px !important;
+        background: linear-gradient(90deg,#1e1e35 25%,#2a2a45 50%,#1e1e35 75%) !important;
+        background-size: 200% 100% !important;
+        animation: qi-shimmer 1.4s infinite !important;
+      }
+      @keyframes qi-shimmer {
+        0%   { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
+    </style>
+
+    <div id="quickIntelBar">
+      <!-- Skeleton placeholders — replaced by JS once data loads -->
+      <div class="qi-card"><div class="qi-icon-wrap">⏱</div><div class="qi-body"><div class="qi-skeleton" style="width:60px;margin-bottom:6px;"></div><div class="qi-skeleton" style="width:80px;height:10px;"></div></div></div>
+      <div class="qi-card"><div class="qi-icon-wrap">🕐</div><div class="qi-body"><div class="qi-skeleton" style="width:55px;margin-bottom:6px;"></div><div class="qi-skeleton" style="width:70px;height:10px;"></div></div></div>
+      <div class="qi-card"><div class="qi-icon-wrap">🖥️</div><div class="qi-body"><div class="qi-skeleton" style="width:70px;margin-bottom:6px;"></div><div class="qi-skeleton" style="width:75px;height:10px;"></div></div></div>
+      <div class="qi-card"><div class="qi-icon-wrap">🛍️</div><div class="qi-body"><div class="qi-skeleton" style="width:80px;margin-bottom:6px;"></div><div class="qi-skeleton" style="width:90px;height:10px;"></div></div></div>
+      <div class="qi-card"><div class="qi-icon-wrap">🍪</div><div class="qi-body"><div class="qi-skeleton" style="width:50px;margin-bottom:6px;"></div><div class="qi-skeleton" style="width:80px;height:10px;"></div></div></div>
     </div>
 
     <!-- ── ANALYTICS CHARTS ROW ── -->
@@ -184,18 +272,7 @@
         </div>
       </div>
 
-      <!-- Violation Donut -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">🥧 Violation Types</span>
-          <span class="chart-sub">Distribution breakdown</span>
-        </div>
-        <div class="chart-body">
-          <canvas id="violationsChart"></canvas>
-        </div>
-      </div>
-
-      <!-- Network Distribution -->
+      <!-- Top Networks -->
       <div class="chart-card">
         <div class="chart-header">
           <span class="chart-title">🌐 Top Networks</span>
@@ -219,43 +296,43 @@
 
     </div><!-- /charts-grid -->
 
-    <!-- ── SECOND ANALYTICS ROW ── -->
-    <div class="charts-grid">
+    <!-- ── NEW ANALYTICS ROW ── -->
+    <div class="charts-grid charts-grid-3" style="margin-bottom:24px;">
 
-      <!-- Session Duration Distribution -->
+      <!-- Hour-of-Day Heatmap -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">🕐 Activity by Hour</span>
+          <span class="chart-sub">Violations per hour of day</span>
+        </div>
+        <div class="chart-body" style="height:200px;">
+          <canvas id="hourChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Server Distribution -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">🖥️ Top Servers</span>
+          <span class="chart-sub">Findings per server</span>
+        </div>
+        <div class="chart-body" style="height:200px;">
+          <canvas id="serverChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Session Duration -->
       <div class="chart-card">
         <div class="chart-header">
           <span class="chart-title">⏱ Session Duration</span>
-          <span class="chart-sub">How long each test session ran</span>
+          <span class="chart-sub">Distribution of session lengths</span>
         </div>
-        <div class="chart-body">
-          <canvas id="sessionDurationChart"></canvas>
-        </div>
-      </div>
-
-      <!-- Publisher Injection Distribution -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">🕵️ Top Injected Publishers</span>
-          <span class="chart-sub">Publisher IDs injected most frequently</span>
-        </div>
-        <div class="chart-body">
-          <canvas id="publisherChart"></canvas>
+        <div class="chart-body" style="height:200px;">
+          <canvas id="durationChart"></canvas>
         </div>
       </div>
 
-      <!-- Coupon Site Source Donut -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">🎟️ Coupon Site Sources</span>
-          <span class="chart-sub">Which coupon sites trigger injections</span>
-        </div>
-        <div class="chart-body">
-          <canvas id="couponSiteChart"></canvas>
-        </div>
-      </div>
-
-    </div>
+    </div><!-- /new analytics row -->
 
     <!-- ── PUBLISHER INTELLIGENCE TABLE ── -->
     <div class="table-section">
@@ -280,61 +357,6 @@
               <th>Brands Hit</th>
               <th>Injections</th>
               <th>Via Coupon Sites</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ── ADVERTISER ANALYSIS TABLE ── -->
-    <div class="table-section">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <div>
-          <h3>🏪 Advertiser (Merchant) Attack Surface</h3>
-          <p class="hint-text">
-            Which advertiser/merchant IDs (<code class="inline-code">advValue</code>) are being targeted across brands and networks.
-            &nbsp;<span class="kpi-inline">Unique advertisers: <b id="advertiserCount">—</b></span>
-          </p>
-        </div>
-      </div>
-      <div class="table-wrapper" style="max-height:300px;">
-        <table id="advertiserTable">
-          <thead>
-            <tr>
-              <th>Rank</th>
-              <th>Advertiser ID</th>
-              <th>Brands Targeted</th>
-              <th>Network</th>
-              <th>Findings</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ── COUPON SITE ATTACK SURFACE ── -->
-    <div class="table-section">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <div>
-          <h3>🎟️ Coupon Site Attack Surface</h3>
-          <p class="hint-text">
-            Which coupon/cashback sites are being used as the entry point for affiliate injection attacks.
-            &nbsp;<span class="kpi-inline">Unique sites: <b id="couponSiteCount">—</b></span>
-            &nbsp;<span class="hint-text" style="display:inline;">Click a row to filter records to that site.</span>
-          </p>
-        </div>
-      </div>
-      <div class="table-wrapper" style="max-height:300px;">
-        <table id="couponSiteTable">
-          <thead>
-            <tr>
-              <th>Rank</th>
-              <th>Coupon Site</th>
-              <th>Extensions</th>
-              <th>Brands Targeted</th>
-              <th>Findings</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -411,36 +433,6 @@
       </div>
     </div>
 
-    <!-- ── AFFILIATE FINGERPRINT ── -->
-    <div class="table-section">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <div>
-          <h3>🕵️ Affiliate Fingerprint</h3>
-          <p class="hint-text">
-            Injected affiliate IDs grouped across all records. Same ID appearing across multiple extensions = coordinated fraud signal.
-            &nbsp;<span class="kpi-inline">Unique IDs: <b id="fingerprintCount">—</b></span>
-            &nbsp;<span class="kpi-inline warn">⚠️ Multi-ext IDs: <b id="suspectCount">—</b></span>
-          </p>
-        </div>
-      </div>
-      <div class="table-wrapper" style="max-height:340px;">
-        <table id="affiliateFingerprintTable">
-          <thead>
-            <tr>
-              <th>Rank</th>
-              <th>Injected Publisher ID</th>
-              <th>Extensions Using</th>
-              <th>Brands Hit</th>
-              <th>Total Injections</th>
-              <th>Via Coupon Sites</th>
-              <th>Networks</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-
     <!-- Records Table -->
     <div class="table-section">
       <h3>Records</h3>
@@ -510,21 +502,6 @@
           <div class="stat-value" id="chronicBrands">0</div>
           <div class="stat-label">Chronic (2+ wks)</div>
         </div>
-      </div>
-    </div>
-
-    <!-- Top Brands Chart -->
-    <div class="chart-card chart-full" id="topBrandsChartSection">
-      <div class="chart-header">
-        <span class="chart-title">🏆 Top 15 Brands by Findings</span>
-        <span class="chart-sub" style="font-size:12px;">
-          <span style="display:inline-block;width:12px;height:12px;background:rgba(255,107,107,0.8);border-radius:2px;margin-right:4px;"></span>Trending up &nbsp;
-          <span style="display:inline-block;width:12px;height:12px;background:rgba(67,233,123,0.8);border-radius:2px;margin-right:4px;"></span>Trending down &nbsp;
-          <span style="display:inline-block;width:12px;height:12px;background:rgba(102,126,234,0.8);border-radius:2px;margin-right:4px;"></span>Stable
-        </span>
-      </div>
-      <div class="chart-body chart-tall">
-        <canvas id="topBrandsChart"></canvas>
       </div>
     </div>
 
@@ -637,13 +614,6 @@
           <button onclick="fetchServerStatus()" class="back-btn" style="font-size:12px;padding:6px 14px;">🔄 Refresh</button>
         </div>
       </div>
-      <!-- Enhanced utilization bar -->
-      <div id="serverUtilSummary" style="margin-bottom:20px;"></div>
-      <!-- Session history indicator -->
-      <div id="serverUtilHistory" style="margin-bottom:20px;display:none;">
-        <div style="color:#666;font-size:12px;margin-bottom:6px;">Utilization trend (this session, last 10 readings):</div>
-        <div id="utilSparkline" class="util-sparkline"></div>
-      </div>
       <div class="server-status-block">
         <h3>🔴 Busy Servers <span id="busyCount" style="font-size:14px;color:#ff6b6b;font-weight:normal;margin-left:8px;"></span></h3>
         <div id="busyServerStatus" class="server-status-list">Loading...</div>
@@ -655,42 +625,45 @@
       <p style="color:#666;font-size:12px;margin-top:16px;">Auto-refreshes every 60 seconds.</p>
     </div>
   </div>
-
+                                                                          
   <!-- ══════════════════════════════════════════════════════════
        VM ADWARE VIEW
   ══════════════════════════════════════════════════════════ -->
   <div id="view-vm-adware" class="view-content" style="display:none;">
 
-    <!-- VM Adware Charts Row -->
-    <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px;margin-bottom:24px;">
-      <div class="chart-card chart-full">
-        <div class="chart-header">
-          <span class="chart-title">🛡️ Adware Count per VM</span>
-          <span class="chart-sub">Which VMs have the most exposed extensions</span>
-        </div>
-        <div class="chart-body chart-tall">
-          <canvas id="vmAdwareChart"></canvas>
-        </div>
-      </div>
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">🌐 Browser Breakdown</span>
-          <span class="chart-sub">By adware count</span>
-        </div>
-        <div class="chart-body chart-tall">
-          <canvas id="vmBrowserChart"></canvas>
-        </div>
-      </div>
-    </div>
-
     <!-- VM Adware Timeline -->
-    <div class="chart-card" style="margin-bottom:24px;">
-      <div class="chart-header">
-        <span class="chart-title">📈 Adware Installations Over Time</span>
-        <span class="chart-sub">When were adware extensions first recorded</span>
+
+
+    <div class="table-section">
+      <h3>🖥️ Server-wise Extension Findings</h3>
+      <p class="hint-text">
+        Analyze findings distribution across servers. Click a server card to view detailed extension status.
+      </p>
+      
+      <!-- Server Summary Grid -->
+      <div id="serverSummaryGrid" class="cards cards-4" style="margin-bottom: 24px;">
+        <!-- Dynamically populated -->
       </div>
-      <div class="chart-body" style="height:200px;">
-        <canvas id="vmAdwareTimelineChart"></canvas>
+
+      <!-- Server Detail Section (Hidden by default) -->
+      <div id="serverDetailSection" style="display: none; border-top: 1px solid #2a2a40; padding-top: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <h4 id="selectedServerTitle" style="color: #64ffda; margin: 0;">Server Detail: -</h4>
+          <button class="back-btn" onclick="hideServerDetail()" style="font-size: 12px; padding: 6px 12px;">✕ Close Detail</button>
+        </div>
+        <div class="table-wrapper" style="max-height: 400px;">
+          <table id="serverExtensionMatrixTable">
+            <thead>
+              <tr>
+                <th>Extension</th>
+                <th>Findings Count</th>
+                <th>Last Finding Date</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -728,6 +701,95 @@
   </div><!-- /view-vm-adware -->
 
 </div><!-- /.main-content -->
+
+  <!-- Floating Utility Menu -->
+  <style>
+    #floatingUtils {
+      position: fixed !important;
+      bottom: 28px !important;
+      right: 28px !important;
+      left: auto !important;
+      top: auto !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: flex-end !important;
+      gap: 10px !important;
+      z-index: 99999 !important;
+    }
+    #fabMain {
+      all: unset !important;
+      box-sizing: border-box !important;
+      width: 54px !important;
+      height: 54px !important;
+      border-radius: 50% !important;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+      color: #fff !important;
+      font-size: 24px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      cursor: pointer !important;
+      box-shadow: 0 8px 24px rgba(102,126,234,0.5) !important;
+      transition: transform 0.25s ease, box-shadow 0.25s ease !important;
+      order: 2 !important;
+    }
+    #fabMain:hover { transform: scale(1.1) rotate(45deg) !important; }
+    #floatingUtils.active #fabMain { transform: rotate(45deg) !important; }
+
+    #fabMenu {
+      all: unset !important;
+      box-sizing: border-box !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: flex-end !important;
+      gap: 8px !important;
+      opacity: 0 !important;
+      transform: translateY(12px) scale(0.94) !important;
+      pointer-events: none !important;
+      transition: opacity 0.2s ease, transform 0.2s ease !important;
+      order: 1 !important;
+    }
+    #floatingUtils.active #fabMenu {
+      opacity: 1 !important;
+      transform: translateY(0) scale(1) !important;
+      pointer-events: auto !important;
+    }
+
+    .fab-pill {
+      all: unset !important;
+      box-sizing: border-box !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      padding: 10px 20px !important;
+      border-radius: 28px !important;
+      border: 1px solid rgba(255,255,255,0.15) !important;
+      background: rgba(20, 20, 40, 0.96) !important;
+      color: #e0e0e0 !important;
+      font-family: 'Segoe UI', system-ui, sans-serif !important;
+      font-size: 13px !important;
+      font-weight: 600 !important;
+      white-space: nowrap !important;
+      cursor: pointer !important;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.45) !important;
+      letter-spacing: 0.3px !important;
+      transition: background 0.18s, color 0.18s, transform 0.18s, box-shadow 0.18s !important;
+      backdrop-filter: blur(12px) !important;
+    }
+    .fab-pill:hover { transform: translateX(-5px) !important; }
+    #fabBtnTop:hover    { background: linear-gradient(135deg,#43e97b,#38f9d7) !important; color:#0f0f23 !important; box-shadow:0 6px 20px rgba(67,233,123,0.5) !important; border-color:transparent !important; }
+    #fabBtnClear:hover  { background: linear-gradient(135deg,#ff6b6b,#ee5a24) !important; color:#fff !important; box-shadow:0 6px 20px rgba(255,107,107,0.5) !important; border-color:transparent !important; }
+    #fabBtnBottom:hover { background: linear-gradient(135deg,#667eea,#764ba2) !important; color:#fff !important; box-shadow:0 6px 20px rgba(102,126,234,0.5) !important; border-color:transparent !important; }
+  </style>
+
+  <div id="floatingUtils">
+    <button id="fabMain" title="Utility Menu" aria-label="Open utility menu">⚙️</button>
+    <div id="fabMenu" role="menu">
+      <button id="fabBtnTop"    class="fab-pill" onclick="scrollToTop()"     title="Go to top"        role="menuitem">🔼 &nbsp;Top</button>
+      <button id="fabBtnClear"  class="fab-pill" onclick="clearAllFilters()" title="Clear all filters" role="menuitem">🧹 &nbsp;Clear Filters</button>
+      <button id="fabBtnBottom" class="fab-pill" onclick="scrollToBottom()"  title="Go to bottom"     role="menuitem">🔽 &nbsp;Bottom</button>
+    </div>
+  </div>
 
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
