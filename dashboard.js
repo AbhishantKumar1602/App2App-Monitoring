@@ -315,6 +315,12 @@ function loadMainData() {
           setLoadProgress(85, "Building charts…");
           setTimeout(() => {
             initializeBrandData(raw);
+            
+            // Refresh VM matrix if adware data is ready (sync findings data)
+            if (state.vmAdwareData && state.vmAdwareData.length > 0) {
+              applyVmAdwareFilters();
+            }
+
             setLoadProgress(100, "Done");
           }, 50);
         }, 0);
