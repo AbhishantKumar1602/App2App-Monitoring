@@ -17,6 +17,7 @@ const state = {
     byType:     new Map(),
     byPub:      new Map(),
     byCoupon:   new Map(),
+    byServer:   new Map(),
   },
 };
 
@@ -37,6 +38,12 @@ const charts = {
 // Server utilization history for sparkline
 const utilHistory = [];
 
+// Normalize server name to standard format
+function normalizeServerName(name) {
+  if (!name) return name;
+  return name.replace(/^s*server/i, "Server");
+}
+
 // ── Loading progress bar ──────────────────────────────────────
 function setLoadProgress(pct, label) {
   const bar  = document.getElementById("loadProgressBar");
@@ -52,7 +59,7 @@ function setLoadProgress(pct, label) {
 function buildIndices(data) {
   const idx = state.indices;
   idx.byExtName.clear(); idx.byNetwork.clear();
-  idx.byType.clear(); idx.byPub.clear(); idx.byCoupon.clear();
+  idx.byType.clear(); idx.byPub.clear(); idx.byCoupon.clear(); idx.byServer.clear();
 
   data.forEach((r, i) => {
     // extensionName
@@ -81,6 +88,12 @@ function buildIndices(data) {
     if (r.couponSite) {
       if (!idx.byCoupon.has(r.couponSite)) idx.byCoupon.set(r.couponSite, []);
       idx.byCoupon.get(r.couponSite).push(i);
+    }
+    // serverName
+    if (r.serverName) {
+      const norm = normalizeServerName(r.serverName);
+      if (!idx.byServer.has(norm)) idx.byServer.set(norm, []);
+      idx.byServer.get(norm).push(i);
     }
   });
 }
@@ -190,7 +203,7 @@ function fetchServerStatus() {
     .then(data => {
       const list = data.data?.vmMasterList || [];
       const renderVm = vm => {
-        const name = esc(vm.vmName || vm.vmId || "Unknown");
+        const name = esc(normalizeServerName(vm.vmName || vm.vmId || "Unknown"));
         const loc = state.vmRackInfo[name.toLowerCase()] || "";
         const locHtml = loc ? `<div style="font-size:13px;font-weight:500;margin-top:3px;color:#0000b3;">${esc(loc)}</div>` : "";
         return `<span class="${vm.vmStatus === 1 ? "busy-server" : "free-server"}">${name}${locHtml}</span>`;
@@ -290,14 +303,15 @@ function loadMainData() {
         buildIndices(raw);
 
         // Build select lists from single-pass Maps
-        const extNames = [], netNames = [], typeNames = [], pubNames = [], couponNames = [];
-        const extSeen = new Set(), netSeen = new Set(), typeSeen = new Set(), pubSeen = new Set(), couponSeen = new Set();
+        const extNames = [], netNames = [], typeNames = [], pubNames = [], couponNames = [], serverNames = [];
+        const extSeen = new Set(), netSeen = new Set(), typeSeen = new Set(), pubSeen = new Set(), couponSeen = new Set(), serverSeen = new Set();
         raw.forEach(d => {
           if (d.extensionName && !extSeen.has(d.extensionName)) { extSeen.add(d.extensionName); extNames.push(d.extensionName); }
           d.networks.split(",").forEach(n => { const t = n.trim(); if (t && !netSeen.has(t)) { netSeen.add(t); netNames.push(t); } });
           if (d.type && !typeSeen.has(d.type)) { typeSeen.add(d.type); typeNames.push(d.type); }
           if (d.pubValue && !pubSeen.has(d.pubValue)) { pubSeen.add(d.pubValue); pubNames.push(d.pubValue); }
           if (d.couponSite && !couponSeen.has(d.couponSite)) { couponSeen.add(d.couponSite); couponNames.push(d.couponSite); }
+          if (d.serverName && !serverSeen.has(d.serverName)) { serverSeen.add(d.serverName); serverNames.push(normalizeServerName(d.serverName)); }
         });
 
         fillSelect("extensionFilter", extNames, "All Extensions");
@@ -305,6 +319,7 @@ function loadMainData() {
         fillSelect("typeFilter",      typeNames, "All Types");
         fillSelect("pubFilter",       pubNames, "All Publishers");
         fillSelect("couponSiteFilter",couponNames, "All Coupon Sites");
+        fillSelect("serverFilter",    serverNames, "All Servers");
         initializeDatePickers();
 
         setLoadProgress(70, "Rendering table…");
@@ -357,6 +372,7 @@ function applyFilters() {
   const typeVal  = document.getElementById("typeFilter")?.value       || "";
   const pubVal   = document.getElementById("pubFilter")?.value        || "";
   const couponVal= document.getElementById("couponSiteFilter")?.value || "";
+  const server   = document.getElementById("serverFilter")?.value     || "";
   const from     = document.getElementById("fromDate")?.value         || "";
   const to       = document.getElementById("toDate")?.value           || "";
   const search   = (document.getElementById("searchBox")?.value || "").toLowerCase();
@@ -369,6 +385,7 @@ function applyFilters() {
   if (typeVal)   candidateSet = intersectSets(candidateSet, indexLookup(idx.byType,     typeVal)  || new Set());
   if (pubVal)    candidateSet = intersectSets(candidateSet, indexLookup(idx.byPub,      pubVal)   || new Set());
   if (couponVal) candidateSet = intersectSets(candidateSet, indexLookup(idx.byCoupon,   couponVal)|| new Set());
+  if (server)    candidateSet = intersectSets(candidateSet, indexLookup(idx.byServer,   server)   || new Set());
 
   let filtered;
   if (candidateSet === "ALL") {
@@ -1893,7 +1910,8 @@ function renderServerExtensionMatrix(adwareData, findingsData) {
 
   // Adware data (potential findings)
   adwareData.forEach(ad => {
-    const sName = ad.vmName || "Unknown";
+    let sName = ad.vmName || "Unknown";
+    sName = normalizeServerName(sName);
     const sKey = sName.toLowerCase();
     if (!serverMap[sKey]) {
       serverMap[sKey] = { name: sName, findingsCount: 0, adwareCount: 0, extensions: {} };
@@ -1907,7 +1925,8 @@ function renderServerExtensionMatrix(adwareData, findingsData) {
 
   // Findings data
   findingsData.forEach(f => {
-    const sName = f.serverName || f.vm || "Unknown";
+    let sName = f.serverName || f.vm || "Unknown";
+    sName = normalizeServerName(sName);
     const sKey = sName.toLowerCase();
     if (!serverMap[sKey]) {
       serverMap[sKey] = { name: sName, findingsCount: 0, adwareCount: 0, extensions: {} };
@@ -2027,7 +2046,7 @@ function updateVmAdwareTable(data) {
   data.forEach(r => {
     const tr = document.createElement("tr");
     const dateStr = r.createddate ? r.createddate.split(" ")[0] : "-";
-    const vmName = r.vmName || "Unknown";
+    const vmName = normalizeServerName(r.vmName || "Unknown");
     const loc = state.vmRackInfo[vmName.toLowerCase()] || "";
     const vmDisplay = loc ? `${vmName} — ${loc}` : vmName;
     const eTd = document.createElement("td"); eTd.textContent = r.extensionId || "-";
@@ -2123,6 +2142,7 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("typeFilter")?.addEventListener("change", applyFilters);
   document.getElementById("pubFilter")?.addEventListener("change", applyFilters);
   document.getElementById("couponSiteFilter")?.addEventListener("change", applyFilters);
+  document.getElementById("serverFilter")?.addEventListener("change", applyFilters);
   document.getElementById("searchBox")?.addEventListener("input", debouncedApplyFilters);
   document.getElementById("extensionIdNameBox")?.addEventListener("input", debouncedApplyFilters);
   document.getElementById("brandSearchBox")?.addEventListener("input", debouncedApplyBrandFilters);
@@ -2184,7 +2204,7 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("downloadVmAdwareExcelBtn")?.addEventListener("click", () => {
     const toExport = state.filteredVmAdwareData.length ? state.filteredVmAdwareData : state.vmAdwareData;
     const exportData = toExport.map(r => {
-      const vmName = r.vmName || "Unknown";
+      const vmName = normalizeServerName(r.vmName || "Unknown");
       const loc = state.vmRackInfo[vmName.toLowerCase()] || "";
       return { "Extension ID": r.extensionId || "-", "Extension Name": r.extensionName || "-", "VM Name": vmName, Location: loc, Browser: r.browser || "-", "Created Date": r.createddate || "-" };
     });
